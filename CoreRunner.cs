@@ -30,6 +30,6 @@ internal sealed class CoreRunner : MonoBehaviour {
 		if (now < _next) return;
 		_next = now + 0.25f;
 		try { LobbyState.Tick(); }
-		catch (Exception e) { CoreLog.Once("runner:" + e.GetType().Name, "tick failed: " + e); }
+		catch (Exception e) { CoreLog.Once("runner:lobby", "lobby tick failed: " + e); }
 	}
 }

@@ -146,10 +146,10 @@ var civ = Core.Civilizations.Add("authorname.mycivilization", "My civilization",
 |---|---|
 | `key` | Unique, prefixed with your name. It is hashed into the id, so multiplayer and saves agree. |
 | `name` | Display name. |
-| `techTree` | Function returning the game's `DiceKingdoms.Game.TechTree` for it (may return `null` if you add the tree to the game's list yourself). |
+| `techTree` | Function returning the game's `DiceKingdoms.Game.TechTree` for it. May be `null` (or return `null`): the tree of the `skinsLike` civilization is used then, so nothing throws. |
 | `skinsLike` | Built-in civilization whose biome and visuals are used: 0 Europe, 1 Middle East, 2 Viking, 3 Ancient, 4 Maya. |
 
-The game looks tech trees up in its own list (it throws for an unknown civilization) and skins players with a switch over 0..4. ModCore patches both. Your mod still provides the civilization's
+The game looks tech trees up in its own list (it throws for an unknown civilization), skins players with a switch over 0..4 and lets a player step through the civilizations their Steam inventory has unlocked by clicking their castle on the match-start screen. ModCore patches all three: your tree is returned, the skins borrow the biome of `skinsLike`, and your civilization is added to the end of the cycle the castle click steps through (after the last civilization the player has unlocked, so players pick it by clicking the castle, like the built-in ones; the player's inventory itself is never changed). Your mod still provides the civilization's
 own data (skins, colours, the `TechTree` asset). `Civilizations.All`, `Added`, `Removed` and `civ.Remove()` exist for tools. To make the civilization selectable on the Rules screen, players install ModBridge.
 
 ---
