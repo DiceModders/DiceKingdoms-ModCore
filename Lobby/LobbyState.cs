@@ -14,11 +14,13 @@ namespace DiceModders.ModCore;
 /// </summary>
 internal static class LobbyState {
 	private const string ModsKey = "modcore.mods";
+	private const string CivsKey = "modcore.civs";
 
 	private static SteamLobby? _lobby;
 	private static ulong _owner;
 	private static LobbyMember[] _members = Array.Empty<LobbyMember>();
 	private static readonly Dictionary<ulong, HashSet<string>> MemberKeys = new();
+	private static readonly Dictionary<ulong, HashSet<string>> MemberCivs = new();
 	private static readonly List<object> Keep = new();   // the IL2CPP delegates must outlive the subscription (the whole session)
 	private static bool _subscribed;
 	private static int _subscribeTries;
@@ -47,6 +49,20 @@ internal static class LobbyState {
 	}
 
 	public static bool MemberHasKey(ulong steamId, string key) => MemberKeys.TryGetValue(steamId, out var keys) && keys.Contains(key);
+
+	/// <summary>True when every other member published the same civilization with the same number (a client without it would not know what the number means).</summary>
+	public static bool EveryoneHasCivilization(ModCivilization civ) {
+		if (!_lobby.HasValue) return true;
+		string clean = CleanCivKey(civ.Key) + "=" + civ.Id;
+		ulong me = LocalSteamId;
+		foreach (var m in _members) {
+			if (m.SteamId == me) continue;
+			if (!(MemberCivs.TryGetValue(m.SteamId, out var set) && set.Contains(clean))) return false;
+		}
+		return true;
+	}
+
+	private static string CleanCivKey(string key) => (key ?? "").Replace(',', '_').Replace(';', '_');
 
 	// ------------------------------------------------------------------ subscription
 
@@ -113,6 +129,7 @@ internal static class LobbyState {
 		try {
 			_lobby = lobby;
 			MemberKeys.Clear();
+			MemberCivs.Clear();
 			Reload();
 			CoreLog.Trace($"lobby entered: id={lobby.Id.Value} members={_members.Length} host={(IsHost ? "me" : _owner.ToString())}");
 			PublishMods();
@@ -138,6 +155,7 @@ internal static class LobbyState {
 			if (!IsCurrent(lobby)) return;
 			_dataEvents++;
 			ReadMemberMods(lobby, member);   // someone published their rule keys: the "may desync" warning may change
+			CivilizationGuard.Run();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:memberdata", "lobby: member data handler: " + e); }
 	}
@@ -148,6 +166,7 @@ internal static class LobbyState {
 			CoreLog.Trace($"member {(gone ? "left" : "joined")}: {member.Id.Value}");
 			if (gone && member.Id.Value == LocalSteamId) { Leave(); return; }
 			Reload();
+			CivilizationGuard.Run();   // a member without a civilization the host picked must not be sent its number
 			LobbyRuleRegistry.ReevaluateAll();
 			ModCore.Lobby.RaiseChanged();
 		}
@@ -161,6 +180,7 @@ internal static class LobbyState {
 		_owner = 0;
 		_members = Array.Empty<LobbyMember>();
 		MemberKeys.Clear();
+		MemberCivs.Clear();
 		LobbyRuleRegistry.ReevaluateAll();
 		ModCore.Lobby.RaiseChanged();
 	}
@@ -213,6 +233,12 @@ internal static class LobbyState {
 		if (id == LocalSteamId) return;   // our own keys are known without asking Steam
 		var keys = LobbyRuleRegistry.ParseKeys(lobby.GetMemberData(member, ModsKey));
 		if (keys != null) MemberKeys[id] = keys; else MemberKeys.Remove(id);
+
+		var civs = new HashSet<string>();
+		string raw = lobby.GetMemberData(member, CivsKey);
+		if (!string.IsNullOrEmpty(raw) && raw.StartsWith("v1"))
+			foreach (var k in raw.Substring(2).Split(',')) if (k.Length > 0) civs.Add(k);
+		if (civs.Count > 0) MemberCivs[id] = civs; else MemberCivs.Remove(id);
 	}
 
 	/// <summary>Tells the other members which rules this client has (Steam member data "modcore.mods").</summary>
@@ -221,6 +247,9 @@ internal static class LobbyState {
 		try {
 			_lobby.Value.SetMemberData(ModsKey, LobbyRuleRegistry.DescribeMods());
 			MemberKeys[LocalSteamId] = LobbyRuleRegistry.ParseKeys(LobbyRuleRegistry.DescribeMods()) ?? new HashSet<string>();
+			var civKeys = new List<string>();
+			foreach (var c in CivilizationRegistry.All) civKeys.Add(CleanCivKey(c.Key) + "=" + c.Id);
+			_lobby.Value.SetMemberData(CivsKey, "v1" + string.Join(",", civKeys));
 		}
 		catch (Exception e) { CoreLog.Once("lobby:publish", "lobby: could not publish the rule keys: " + e.Message); }
 	}

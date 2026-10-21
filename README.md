@@ -139,7 +139,8 @@ Screens (ModBridge) show these lines; your mod can also block a start button or 
 
 ```csharp
 var civ = Core.Civilizations.Add("authorname.mycivilization", "My civilization", () => myTechTree, skinsLike: 2);
-// civ.Id is the civilization number: the same key gives the same id on every machine (1000 and up)
+// civ.Id is the civilization number: the same key gives the same id on every machine, 5..127
+// (the game sends the civilization as one signed byte; the built-in ones are 0..4)
 ```
 
 | Parameter | Meaning |
@@ -149,8 +150,24 @@ var civ = Core.Civilizations.Add("authorname.mycivilization", "My civilization",
 | `techTree` | Function returning the game's `DiceKingdoms.Game.TechTree` for it. May be `null` (or return `null`): the tree of the `skinsLike` civilization is used then, so nothing throws. |
 | `skinsLike` | Built-in civilization whose biome and visuals are used: 0 Europe, 1 Middle East, 2 Viking, 3 Ancient, 4 Maya. |
 
-The game looks tech trees up in its own list (it throws for an unknown civilization), skins players with a switch over 0..4 and lets a player step through the civilizations their Steam inventory has unlocked by clicking their castle on the match-start screen. ModCore patches all three: your tree is returned, the skins borrow the biome of `skinsLike`, and your civilization is added to the end of the cycle the castle click steps through (after the last civilization the player has unlocked, so players pick it by clicking the castle, like the built-in ones; the player's inventory itself is never changed). Your mod still provides the civilization's
-own data (skins, colours, the `TechTree` asset). `Civilizations.All`, `Added`, `Removed` and `civ.Remove()` exist for tools. To make the civilization selectable on the Rules screen, players install ModBridge.
+The game uses the civilization number in several places and throws (or freezes) for an unknown one. ModCore patches each of them:
+
+| Game code | ModCore |
+|---|---|
+| `Technologies.TechTree`, and the copies the compiler inlined into `Statistics.TechTree` / `IsTechnologyLearnable` | Your tree (or the `skinsLike` tree); the learnable rule is reproduced for your civilization |
+| `PlayerSkins` constructor / setter (biome switch over 0..4) | Built for `skinsLike`, the real number stored afterwards |
+| The network readers of `PlayerSkinsSerialization` (the number travels as one byte) | Build the skins from the number; an unknown number becomes the first civilization instead of throwing |
+| `PlayerSkins.Get*Prefab` (skin registry lookups by civilization) | Your `civ.Skins` model if you set one, otherwise the look of `skinsLike` |
+| `AIPlay.SampleBuildOrder` | Uses the build orders of `skinsLike` |
+| The castle click (`Player.NextCivilization`) | Your civilization is added after the unlocked ones, only when every lobby member has it (published as `modcore.civs`); the host moves a player off one somebody lacks |
+| The text key `civilization.<id>.name` | `name` is added to the text table of the current language |
+
+Your mod provides what is its own: `civ.Skins` (building, unit, nature and ship prefabs; leave out what you do not replace), the tech tree (`ModCore.Civilizations.CloneTree(from)` copies a built-in one to
+edit), and the name. See the wiki page *Making a civilization* for the step by step guide, every asset a civilization can have and what cannot be changed (biome, AI build orders, 5..127).
+`Civilizations.All`, `Added`, `Removed` and `civ.Remove()` exist for tools. To make the civilization selectable on the Rules screen, players install ModBridge.
+
+`[Debug] DumpGameData = true` in the ModCore config makes ModCore write `BepInEx/ModCore-game-data.txt` (technologies, tech trees, building types, the skin registry, prefabs) and
+`BepInEx/ModCore-sprites.txt` (every sprite) once the game has loaded: the reference for finding the game's own prefabs and sprites to copy.
 
 ---
 
@@ -180,7 +197,11 @@ The interop folder exists after the first game start with BepInEx 6 installed (i
 | `Lobby/LobbyState.cs` | Steam subscription, members, owner, match start/end, freezing. |
 | `Lobby/LobbyHooks.cs` | Harmony patches on `GameState.StartGame` / `OnDisable`. |
 | `Lobby/LobbyRuleRegistry.cs`, `LobbyMods.cs` | Rule registry, the `modcore.mods` format, which plugin registered a rule. |
-| `Civilizations/` | Public API and the two patches that make unknown civilization numbers safe. |
+| `Civilizations/CivilizationsApi.cs` | Public API (`Add`, `CloneTree`, registry). |
+| `Civilizations/CivilizationHooks.cs` | The patches that make unknown civilization numbers safe (tree, skins, network readers, castle click, AI, `Statistics`, guard). |
+| `Civilizations/CivilizationSkins.cs` | `civ.Skins` (own models) and the skin lookup patches. |
+| `Civilizations/CivilizationText.cs` | Adds the civilization names to the game's text table. |
+| `Civilizations/GameDataDump.cs` | The `DumpGameData` developer tool. |
 | `docs/NOTES.md` | How it works inside and why (read before changing the hooks). |
 | `docs/EXAMPLE_MOD.md` | A complete minimal mod. |
 
@@ -199,6 +220,7 @@ The interop folder exists after the first game start with BepInEx 6 installed (i
 | Rules never change in the lobby | You are not the host, or the match already started (`Editable` is false). |
 | `Value` is the default in a lobby | The host has not changed it, or Steam is not initialised yet (`ModCore.Lobby.InLobby` false). |
 | No rows in the lobby settings | Install ModBridge (and UiKit); ModCore itself has no screens. |
-| Game throws with a mod civilization | The civilization has no data of its own yet (skins, tech tree asset). See `docs/NOTES.md`. |
+| Game throws with a mod civilization | Send `Player.log` (the game's own log, `...\LocalLow\Fivemid\Dice-Kingdoms`) with the log: it has the full stack trace, which names the game code that still reads the number. See `docs/NOTES.md`. |
+| A friend's game freezes when you pick the civilization | The friend lacks the mod; ModCore only offers civilizations everybody has, so check both have the same ModCore version. |
 
 Logs are in `BepInEx\LogOutput.log`; ModCore lines are prefixed `[ModCore]`. Report issues with the log attached.

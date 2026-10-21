@@ -11,6 +11,7 @@ internal sealed class CoreRunner : MonoBehaviour {
 	private static CoreRunner _instance;
 	private static bool _registered;
 	private float _next;
+	private float _nextGuard;
 
 	internal static void Spawn() {
 		if (_instance != null) return;
@@ -31,5 +32,11 @@ internal sealed class CoreRunner : MonoBehaviour {
 		_next = now + 0.25f;
 		try { LobbyState.Tick(); }
 		catch (Exception e) { CoreLog.Once("runner:lobby", "lobby tick failed: " + e); }
+		if (now >= _nextGuard) {
+			_nextGuard = now + 1f;
+			CivilizationGuard.Run();
+			CivilizationText.Tick();
+			GameDataDump.Tick();
+		}
 	}
 }
