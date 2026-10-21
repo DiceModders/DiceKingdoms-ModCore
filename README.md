@@ -9,8 +9,8 @@ ModCore has no interface at all. It answers the questions every multiplayer mod 
 - Does everybody in the lobby have my mod? If not, warn before the game desyncs.
 - How do I add a new civilization without the game throwing?
 
-Windows, buttons and settings screens are the job of [UiKit](https://github.com/superartyom/DiceKingdoms-UiKit). ModCore and UiKit do not know each other.
-[ModBridge](https://github.com/superartyom/DiceKingdoms-ModBridge) is the small plugin that shows ModCore's data on UiKit's screens (lobby rules in the lobby
+Windows, buttons and settings screens are the job of [UiKit](https://github.com/DiceModders/UIKit_Another_Version). ModCore and UiKit do not know each other.
+[ModBridge](https://github.com/DiceModders/DiceKingdoms-ModBridge) is the small plugin that shows ModCore's data on UiKit's screens (lobby rules in the lobby
 settings box, civilizations in the Rules drop-down).
 
 > **Desync protection, not anticheat.** The game has no anticheat or ban system: it uses Steam to connect the players and its own synchronisation for the match.
@@ -159,7 +159,7 @@ own data (skins, colours, the `TechTree` asset). `Civilizations.All`, `Added`, `
 Requirements: .NET SDK 6 or newer, the game installed.
 
 ```powershell
-git clone https://github.com/superartyom/DiceKingdoms-ModCore
+git clone https://github.com/DiceModders/DiceKingdoms-ModCore
 cd DiceKingdoms-ModCore
 .\scripts\link-interop.ps1 "E:\SteamLibrary\steamapps\common\Dice-Kingdoms"   # makes .\interop point at BepInEx\interop (git-ignored)
 dotnet build -c Release --no-incremental
