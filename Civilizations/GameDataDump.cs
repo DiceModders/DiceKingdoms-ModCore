@@ -89,7 +89,11 @@ internal static class GameDataDump {
 	/// <summary>Opt&lt;T&gt; (the game's optional value): "-" when empty, otherwise the value.</summary>
 	private static string Opt(object opt) {
 		if (opt == null) return "-";
-		return Get(opt, "hasValue") is bool has && has ? Convert.ToString(Get(opt, "value")) : "-";
+		var t = opt.GetType();
+		if (!t.Name.StartsWith("Nullable")) return Convert.ToString(opt);   // a plain value
+		var has = Get(opt, "HasValue") ?? Get(opt, "hasValue");
+		if (!(has is bool b) || !b) return "-";
+		return Convert.ToString(Get(opt, "Value") ?? Get(opt, "value"));
 	}
 
 	private static string NameOf(object o) {
@@ -123,11 +127,20 @@ internal static class GameDataDump {
 	}
 
 	private static void DumpSkinRegistry(StringBuilder sb, GameSkinRegistry registry) {
-		var entries = Get(registry, "entries") as IEnumerable;
+		object entries = null;
+		foreach (var name in new[] { "entries", "Entries", "_entries" }) { entries = Get(registry, name); if (entries != null) break; }
+		if (entries == null) {
+			// not where we expected: list what the registry has, so the next dump says where to look
+			const BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+			foreach (var p in registry.GetType().GetProperties(f)) sb.AppendLine($"  property {p.PropertyType.Name} {p.Name}");
+			return;
+		}
 		int n = 0;
-		foreach (var entry in entries) {
-			var key = Get(entry, "key");
-			sb.AppendLine($"'{NameOf(Get(key, "original"))}' -> '{NameOf(Get(entry, "value"))}'  biome={Opt(Get(key, "biome"))} civilization={Opt(Get(key, "civilization"))} variant='{Get(key, "variant")}'");
+		foreach (var entry in (IEnumerable)entries) {
+			if (entry == null) continue;
+			var key = Get(entry, "key") ?? Get(entry, "Key");
+			var value = Get(entry, "value") ?? Get(entry, "Value");
+			sb.AppendLine($"'{NameOf(Get(key, "original") ?? Get(key, "defaultPrefab"))}' -> '{NameOf(value)}'  biome={Opt(Get(key, "biome"))} civilization={Opt(Get(key, "civilization"))} variant='{Get(key, "variant")}'");
 			n++;
 		}
 		sb.AppendLine($"({n} entries)");
