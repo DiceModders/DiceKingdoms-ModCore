@@ -57,14 +57,14 @@ internal static class CivilizationSkinHooks {
 		catch (Exception e) { CoreLog.Error("PlayerSkins." + method + " postfix failed: " + e); }
 	}
 
-	private static ModCivilization Registered() {
+	private static ModCivilization Registered(string what) {
 		int id = PlayerSkinsLookHooks.RealId;
 		return id < 0 ? null : CivilizationRegistry.Find(id);
 	}
 
 	public static void BuildingPostfix(GameBuildingType buildingType, ref GameBuildingVisual __result) {
 		try {
-			var civ = Registered();
+			var civ = Registered("building");
 			if (civ != null && buildingType != null && civ.Skins.Buildings.TryGetValue((int)buildingType.name, out var prefab) && prefab != null) __result = prefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:b", "building skin hook: " + e.Message); }
@@ -72,7 +72,7 @@ internal static class CivilizationSkinHooks {
 
 	public static void UnitPostfix(object unitType, ref GameUnitVisual __result) {
 		try {
-			var civ = Registered();
+			var civ = Registered("unit");
 			if (civ != null && civ.Skins.Units.TryGetValue(Convert.ToInt32(unitType), out var prefab) && prefab != null) __result = prefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:u", "unit skin hook: " + e.Message); }
@@ -80,7 +80,7 @@ internal static class CivilizationSkinHooks {
 
 	public static void NaturePostfix(GameNatureTile natureTile, ref GameNatureVisualHub __result) {
 		try {
-			var civ = Registered();
+			var civ = Registered("nature");
 			if (civ != null && civ.Skins.NatureTiles.TryGetValue((int)natureTile, out var prefab) && prefab != null) __result = prefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:n", "nature skin hook: " + e.Message); }
@@ -88,7 +88,7 @@ internal static class CivilizationSkinHooks {
 
 	public static void ShipPostfix(ref GameShipVisual __result) {
 		try {
-			var civ = Registered();
+			var civ = Registered("ship");
 			if (civ != null && civ.Skins.ShipPrefab != null) __result = civ.Skins.ShipPrefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:s", "ship skin hook: " + e.Message); }

@@ -16,9 +16,9 @@ internal static class CivilizationText {
 	public static string KeyFor(int id) => "civilization." + id + ".name";
 
 	public static void Tick() {
-		if (CivilizationRegistry.All.Count == 0 || LobbyState.InLobby || LobbyState.MatchRunning) return;   // the main menu only: the table outlives the scenes
+		if (CivilizationRegistry.All.Count == 0 || LobbyState.MatchRunning) return;   // not during a match; the game is usually in its (solo) lobby already, which needs the names
 		if (UnityEngine.Time.unscaledTime < _next) return;
-		_next = UnityEngine.Time.unscaledTime + 5f;
+		_next = UnityEngine.Time.unscaledTime + 2f;
 		try {
 			var references = GameStaticReferences.instance;
 			if (references == null) return;
@@ -28,7 +28,7 @@ internal static class CivilizationText {
 			if (table == null) return;
 			foreach (var civ in CivilizationRegistry.All) {
 				string key = KeyFor(civ.Id);
-				if (table.GetEntry(key) == null) table.AddEntry(key, civ.Name);
+				if (table.GetEntry(key) == null) { table.AddEntry(key, civ.Name); CoreLog.Once("civ:text:" + civ.Id, "added the name of civilization " + civ.Id + " ('" + civ.Name + "') to the text table " + table.name); }
 			}
 		}
 		catch (Exception e) { CoreLog.Once("civ:text", "adding civilization names to the game's text table: " + e.Message); }

@@ -87,9 +87,19 @@ internal static class GameDataDump {
 	}
 
 	/// <summary>Opt&lt;T&gt; (the game's optional value): "-" when empty, otherwise the value.</summary>
+	/// <summary>Il2Cpp lists are not System.Collections: read them through Count and the indexer.</summary>
+	private static System.Collections.Generic.IEnumerable<object> Items(object list) {
+		if (list is IEnumerable plain) { foreach (var o in plain) yield return o; yield break; }
+		var t = list.GetType();
+		var count = t.GetProperty("Count")?.GetValue(list);
+		var item = t.GetMethod("get_Item");
+		if (count is int n && item != null) for (int i = 0; i < n; i++) yield return item.Invoke(list, new object[] { i });
+	}
+
 	private static string Opt(object opt) {
 		if (opt == null) return "-";
 		var t = opt.GetType();
+		if (t.Name.StartsWith("Opt")) return "?";   // Utility.Inspector.Opt<T> is a struct: reading it through reflection can crash the game
 		if (!t.Name.StartsWith("Nullable")) return Convert.ToString(opt);   // a plain value
 		var has = Get(opt, "HasValue") ?? Get(opt, "hasValue");
 		if (!(has is bool b) || !b) return "-";
@@ -127,23 +137,11 @@ internal static class GameDataDump {
 	}
 
 	private static void DumpSkinRegistry(StringBuilder sb, GameSkinRegistry registry) {
-		object entries = null;
-		foreach (var name in new[] { "entries", "Entries", "_entries" }) { entries = Get(registry, name); if (entries != null) break; }
-		if (entries == null) {
-			// not where we expected: list what the registry has, so the next dump says where to look
-			const BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-			foreach (var p in registry.GetType().GetProperties(f)) sb.AppendLine($"  property {p.PropertyType.Name} {p.Name}");
-			return;
-		}
-		int n = 0;
-		foreach (var entry in (IEnumerable)entries) {
-			if (entry == null) continue;
-			var key = Get(entry, "key") ?? Get(entry, "Key");
-			var value = Get(entry, "value") ?? Get(entry, "Value");
-			sb.AppendLine($"'{NameOf(Get(key, "original") ?? Get(key, "defaultPrefab"))}' -> '{NameOf(value)}'  biome={Opt(Get(key, "biome"))} civilization={Opt(Get(key, "civilization"))} variant='{Get(key, "variant")}'");
-			n++;
-		}
-		sb.AppendLine($"({n} entries)");
+		// The entries (SkinRegistry.SkinEntry / Key) hold Utility.Inspector.Opt<T> structs; reading those through reflection reads memory that is not an object and
+		// crashes the game (AccessViolation in Il2CppObjectPool.Get), which no try/catch stops. So only the number of entries is reported.
+		var entries = Get(registry, "entries");
+		var count = entries?.GetType().GetProperty("Count")?.GetValue(entries);
+		sb.AppendLine($"({count ?? "?"} entries; their biome/civilization keys cannot be read safely through reflection)");
 	}
 
 	private static void DumpDefaultPrefabs(StringBuilder sb, GameSkinRegistry registry) {

@@ -156,6 +156,7 @@ The game uses the civilization number in several places and throws (or freezes) 
 |---|---|
 | `Technologies.TechTree`, and the copies the compiler inlined into `Statistics.TechTree` / `IsTechnologyLearnable` | Your tree (or the `skinsLike` tree); the learnable rule is reproduced for your civilization |
 | `PlayerSkins` constructor / setter (biome switch over 0..4) | Built for `skinsLike`, the real number stored afterwards |
+| `PlayerSkins.Clone()` (the Rules screen clones the lobby's skins) | Cloned through `skinsLike`, the real number stored afterwards |
 | The network readers of `PlayerSkinsSerialization` (the number travels as one byte) | Build the skins from the number; an unknown number becomes the first civilization instead of throwing |
 | `PlayerSkins.Get*Prefab` (skin registry lookups by civilization) | Your `civ.Skins` model if you set one, otherwise the look of `skinsLike` |
 | `AIPlay.SampleBuildOrder` | Uses the build orders of `skinsLike` |

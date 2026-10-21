@@ -24,6 +24,7 @@ internal static class CivilizationHooks {
 			var harmony = new Harmony("DiceModders.ModCore.civilizations");
 			harmony.PatchAll(typeof(TechTreeLookupHook));
 			harmony.PatchAll(typeof(PlayerSkinsCivilizationHook));
+			harmony.PatchAll(typeof(PlayerSkinsCloneHook));
 			harmony.PatchAll(typeof(NextCivilizationHook));
 			harmony.PatchAll(typeof(AiBuildOrderHook));
 			harmony.PatchAll(typeof(StatisticsTechTreeHook));
@@ -127,6 +128,29 @@ internal static class PlayerSkinsCivilizationHook {
 			return false;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skins", "civilization setter hook: " + e); }
+		return true;
+	}
+}
+
+/// <summary>
+/// <c>PlayerSkins.Clone()</c> is <c>new PlayerSkins(civilization, skinRegistry)</c>, and the constructor throws for a civilization number outside the five built-in
+/// ones. The Rules screen clones the lobby's skins when it opens (<c>Rules.OnEnable</c>), so with a registered civilization chosen on the castle that screen
+/// broke (no tech tree, wrong biome). For a registered civilization the clone is built from the borrowed one and the real number is stored afterwards.
+/// </summary>
+[HarmonyPatch(typeof(GamePlayerSkins), "Clone")]
+internal static class PlayerSkinsCloneHook {
+	[HarmonyPrefix]
+	public static bool Prefix(GamePlayerSkins __instance, ref GamePlayerSkins __result) {
+		try {
+			int id = (int)__instance.civilization;
+			if (id >= 0 && id <= 4) return true;
+			if (!CivilizationRegistry.TryGetSkinsLike(id, out int like)) return true;
+			var copy = new GamePlayerSkins((GameCivilization)like, __instance.skinRegistry);
+			copy.civilization = (GameCivilization)id;
+			__result = copy;
+			return false;
+		}
+		catch (Exception e) { CoreLog.Once("civ:clone", "cloning skins: " + e.Message); }
 		return true;
 	}
 }
