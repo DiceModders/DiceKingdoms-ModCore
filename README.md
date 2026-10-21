@@ -159,11 +159,12 @@ own data (skins, colours, the `TechTree` asset). `Civilizations.All`, `Added`, `
 Requirements: .NET SDK 6 or newer, the game installed.
 
 ```powershell
+$game = "<your Dice-Kingdoms folder>"   # the folder that contains BepInEx, e.g. ...\steamapps\common\Dice-Kingdoms (Steam: Properties > Installed Files > Browse)
 git clone https://github.com/DiceModders/DiceKingdoms-ModCore
 cd DiceKingdoms-ModCore
-.\scripts\link-interop.ps1 "E:\SteamLibrary\steamapps\common\Dice-Kingdoms"   # makes .\interop point at BepInEx\interop (git-ignored)
+.\scripts\link-interop.ps1 $game   # makes .\interop point at BepInEx\interop (git-ignored)
 dotnet build -c Release --no-incremental
-Copy-Item bin\Release\net6.0\DiceModders.ModCore.dll "E:\SteamLibrary\steamapps\common\Dice-Kingdoms\BepInEx\plugins" -Force
+Copy-Item bin\Release\net6.0\DiceModders.ModCore.dll "$game\BepInEx\plugins" -Force
 ```
 
 The interop folder exists after the first game start with BepInEx 6 installed (it is generated into `BepInEx\interop`).

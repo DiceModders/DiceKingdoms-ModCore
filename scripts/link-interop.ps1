@@ -1,5 +1,5 @@
 # Links <repo>/interop to <game>/BepInEx/interop so the projects can reference the game's interop DLLs.
-# Usage:  .\scripts\link-interop.ps1 "C:\Program Files (x86)\Steam\steamapps\common\Dice Kingdoms"
+# Usage:  .\scripts\link-interop.ps1 "<folder that contains BepInEx, e.g. ...\steamapps\common\Dice-Kingdoms>"
 # (A directory junction is used: no administrator rights needed.)
 param([Parameter(Mandatory = $true)][string]$GameDir)
 
