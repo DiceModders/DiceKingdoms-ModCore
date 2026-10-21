@@ -68,7 +68,6 @@ internal static class CivilizationRegistry {
 		tree = null;
 		foreach (var c in Items) {
 			if (c.Id != id || c.TechTree == null) continue;
-			CoreLog.Once("civ:treeprovider:" + id, $"tech tree of '{c.Name}' ({id}) requested, asking its provider");
 			try { tree = c.TechTree(); } catch (Exception e) { CoreLog.Error($"tech tree provider of '{c.Name}': {e}"); }
 			if (tree != null) return true;
 		}
