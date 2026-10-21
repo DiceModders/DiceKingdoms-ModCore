@@ -57,7 +57,7 @@ internal static class LobbyState {
 		try {
 			var lobby = _lobby.Value;
 			if (lobby.MemberCount <= 0) { Leave(); return; }   // no event for "I left": an unjoined lobby has no members
-			if (lobby.Owner.Id.Value != _owner) { Reload(); LobbyRuleRegistry.ReevaluateAll(); ModCore.Lobby.RaiseChanged(); }
+			if (lobby.Owner.Id.Value != _owner) { CoreLog.Trace("lobby owner changed"); Reload(); LobbyRuleRegistry.ReevaluateAll(); ModCore.Lobby.RaiseChanged(); }
 		}
 		catch (Exception e) { CoreLog.Once("lobby:tick", "lobby tick: " + e.Message); }
 	}
@@ -102,11 +102,19 @@ internal static class LobbyState {
 
 	private static bool IsCurrent(SteamLobby lobby) => _lobby.HasValue && _lobby.Value.Id.Value == lobby.Id.Value;
 
+	private static int _dataEvents;   // lobby/member data events since the last summary line (they are far too frequent to log one by one)
+
+	private static void TraceDataEvents(string when) {
+		if (_dataEvents > 0) CoreLog.Trace($"{_dataEvents} lobby/member data event(s) until {when}");
+		_dataEvents = 0;
+	}
+
 	private static void OnEntered(SteamLobby lobby) {
 		try {
 			_lobby = lobby;
 			MemberKeys.Clear();
 			Reload();
+			CoreLog.Trace($"lobby entered: id={lobby.Id.Value} members={_members.Length} host={(IsHost ? "me" : _owner.ToString())}");
 			PublishMods();
 			LobbyRuleRegistry.ReevaluateAll();
 			ModCore.Lobby.RaiseChanged();
@@ -116,10 +124,11 @@ internal static class LobbyState {
 
 	private static void OnDataChanged(SteamLobby lobby) {
 		try {
+			// The game rewrites its own lobby data several times a second, so this must stay cheap: no member reload, no Changed event.
+			// Members and the host are tracked by the member events and the tick; rule values are re-read here and raise their own Changed.
 			if (!IsCurrent(lobby)) return;
-			Reload();
+			_dataEvents++;
 			LobbyRuleRegistry.ReevaluateAll();
-			ModCore.Lobby.RaiseChanged();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:data", "lobby: data handler: " + e); }
 	}
@@ -127,6 +136,7 @@ internal static class LobbyState {
 	private static void OnMemberDataChanged(SteamLobby lobby, SteamFriend member) {
 		try {
 			if (!IsCurrent(lobby)) return;
+			_dataEvents++;
 			ReadMemberMods(lobby, member);   // someone published their rule keys: the "may desync" warning may change
 		}
 		catch (Exception e) { CoreLog.Once("lobby:memberdata", "lobby: member data handler: " + e); }
@@ -135,6 +145,7 @@ internal static class LobbyState {
 	private static void OnMemberChange(SteamLobby lobby, SteamFriend member, bool gone) {
 		try {
 			if (!IsCurrent(lobby)) return;
+			CoreLog.Trace($"member {(gone ? "left" : "joined")}: {member.Id.Value}");
 			if (gone && member.Id.Value == LocalSteamId) { Leave(); return; }
 			Reload();
 			LobbyRuleRegistry.ReevaluateAll();
@@ -145,6 +156,7 @@ internal static class LobbyState {
 
 	/// <summary>The local player is no longer in the lobby.</summary>
 	private static void Leave() {
+		TraceDataEvents("leaving"); CoreLog.Trace("lobby left");
 		_lobby = null;
 		_owner = 0;
 		_members = Array.Empty<LobbyMember>();
@@ -155,6 +167,7 @@ internal static class LobbyState {
 
 	/// <summary>The lobby turned into a match: rules freeze first, then mods hear about it.</summary>
 	public static void MatchStarted() {
+		TraceDataEvents("match start"); CoreLog.Trace($"match started (inLobby={InLobby}, host={IsHost}, rules={LobbyRuleRegistry.All.Count})");
 		MatchRunning = true;
 		LobbyRuleRegistry.FreezeAll();
 		ModCore.Lobby.RaiseMatchStarted();
@@ -163,6 +176,7 @@ internal static class LobbyState {
 	/// <summary>Back in the lobby or the menu: rules follow the lobby again (or fall back to their defaults outside one).</summary>
 	public static void MatchEnded() {
 		if (!MatchRunning) return;
+		TraceDataEvents("match end"); CoreLog.Trace("match ended");
 		MatchRunning = false;
 		LobbyRuleRegistry.UnfreezeAll();
 		ModCore.Lobby.RaiseMatchEnded();

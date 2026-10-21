@@ -160,7 +160,7 @@ public static partial class ModCore {
 		/// <summary>The players of the lobby (a fresh list after every change; empty when not in a lobby).</summary>
 		public static IReadOnlyList<LobbyMember> Members { get { Core.Ensure(); return LobbyState.Members; } }
 
-		/// <summary>Joined or left the lobby, a member joined, left or was kicked, the owner changed, or lobby data changed.</summary>
+		/// <summary>Joined or left the lobby, a member joined, left or was kicked, or the owner changed. Rule values have their own <c>Changed</c> events; plain lobby data changes (the game writes its own several times a second) do not raise this.</summary>
 		public static event Action Changed { add { Core.Ensure(); _changed += value; } remove { _changed -= value; } }
 		private static Action _changed;
 

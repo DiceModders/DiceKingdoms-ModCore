@@ -13,3 +13,9 @@
 - `Technologies.TechTree(civilization)` uses `First(...)` and throws for an unknown civilization: a prefix returns the registered tree provider's tree.
 - `PlayerSkins.Civilization`'s setter switches over 0..4 and throws otherwise: a prefix sets the borrowed built-in civilization first, then stores the real number.
 - The ids come from a hash of the key (1000 and up), so every machine computes the same number.
+
+## Event frequency (measured)
+
+The game writes its own lobby and member data several times a second (a solo match with AIs produced over 100 `OnLobbyDataChanged` / `OnLobbyMemberDataChanged` events in a few minutes).
+So `OnDataChanged` only re-evaluates the rules, and `Lobby.Changed` is raised for membership and owner changes only. Set `[Debug] LogLobbyEvents = true` in `DiceModders.ModCore.cfg`
+to trace the events; the data events are summarised as one counter line per lobby/match phase.

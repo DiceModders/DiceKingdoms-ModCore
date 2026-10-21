@@ -79,7 +79,7 @@ if (Core.Lobby.InLobby && Core.Lobby.IsHost) { /* ... */ }
 foreach (LobbyMember m in Core.Lobby.Members)
     Log($"{m.Name} id={m.SteamId} host={m.IsHost} me={m.IsLocal}");
 
-Core.Lobby.Changed      += () => Refresh();   // joined/left, member joined/left/kicked, owner changed, lobby data changed
+Core.Lobby.Changed      += () => Refresh();   // joined/left, member joined/left/kicked, owner changed (rule values: use rule.Changed)
 Core.Lobby.MatchStarted += () => Freeze();    // the lobby turned into a match (runs on every machine)
 Core.Lobby.MatchEnded   += () => Unfreeze();  // back in the lobby or the menu
 ```

@@ -10,6 +10,11 @@ internal static class CoreLog {
 	public static void Warn(string message)  => Plugin.Log?.LogWarning("[modcore] " + message);
 	public static void Error(string message) => Plugin.Log?.LogError("[modcore] " + message);
 
+	/// <summary>Verbose trace, written only when <c>[Debug] LogLobbyEvents</c> is on in the ModCore config.</summary>
+	public static void Trace(string message) {
+		if (Plugin.LogLobbyEvents != null && Plugin.LogLobbyEvents.Value) Info(message);
+	}
+
 	/// <summary>Logs a message only the first time a key is seen (for things that would otherwise repeat).</summary>
 	public static void Once(string key, string message) {
 		if (Seen.Add(key)) Warn(message);
