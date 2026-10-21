@@ -68,6 +68,7 @@ internal static class CivilizationRegistry {
 		tree = null;
 		foreach (var c in Items) {
 			if (c.Id != id || c.TechTree == null) continue;
+			CoreLog.Once("civ:treeprovider:" + id, $"tech tree of '{c.Name}' ({id}) requested, asking its provider");
 			try { tree = c.TechTree(); } catch (Exception e) { CoreLog.Error($"tech tree provider of '{c.Name}': {e}"); }
 			if (tree != null) return true;
 		}
@@ -117,7 +118,8 @@ public static partial class ModCore {
 		/// <summary>
 		/// A copy of a built-in civilization's tech tree (0 Europe .. 4 Maya) to start a tree of your own from: change its <c>Slots</c> (which technologies appear, where, and
 		/// what they unlock) and return it from the <c>techTree</c> provider. The game's tree is a data asset (technology, grid position and links per slot) and the
-		/// technologies themselves are shared by every tree, so a tree only chooses and arranges them. Call it after the game has loaded (the provider runs late enough).
+		/// technologies themselves are shared by every tree, so a tree only chooses and arranges them. The game asks the provider on every lookup, so
+		/// call this ONCE (keep the result in a field or <c>Lazy</c>) and return the same instance each time. Call it after the game has loaded (the provider runs late enough).
 		/// </summary>
 		public static GameTechTree CloneTree(int fromCivilization) {
 			Core.Ensure();
@@ -127,6 +129,7 @@ public static partial class ModCore {
 			var source = technologies[0].TechTree((GameCivilization)fromCivilization);
 			var copy = UnityEngine.Object.Instantiate(source);
 			copy.name = source.name + " (mod copy)";
+			copy.hideFlags = UnityEngine.HideFlags.HideAndDontSave;   // Unity must not unload the copy when a scene changes
 			return copy;
 		}
 	}
