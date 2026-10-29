@@ -9,7 +9,7 @@ ModCore has no interface at all. It answers the questions every multiplayer mod 
 - Does everybody in the lobby have my mod? If not, warn before the game desyncs.
 - How do I add a new civilization without the game throwing?
 
-Windows, buttons and settings screens are the job of [UiKit](https://github.com/DiceModders/UIKit_Another_Version). ModCore and UiKit do not know each other.
+Windows, buttons and settings screens are the job of [UiKit](https://github.com/DiceModders/UiKit). ModCore and UiKit do not know each other.
 [ModBridge](https://github.com/DiceModders/DiceKingdoms-ModBridge) is the small plugin that shows ModCore's data on UiKit's screens (lobby rules in the lobby
 settings box, civilizations in the Rules drop-down).
 
@@ -225,3 +225,8 @@ The interop folder exists after the first game start with BepInEx 6 installed (i
 | A friend's game freezes when you pick the civilization | The friend lacks the mod; ModCore only offers civilizations everybody has, so check both have the same ModCore version. |
 
 Logs are in `BepInEx\LogOutput.log`; ModCore lines are prefixed `[ModCore]`. Report issues with the log attached.
+
+
+## License
+
+SPDX-License-Identifier: LGPL-2.1-or-later. See [LICENSE](LICENSE).
