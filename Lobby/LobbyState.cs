@@ -185,21 +185,26 @@ internal static class LobbyState {
 		ModCore.Lobby.RaiseChanged();
 	}
 
-	/// <summary>The lobby turned into a match: rules freeze first, then mods hear about it.</summary>
+	/// <summary>
+	/// The lobby turned into a match: rules freeze first, then mods hear about it. Called from the game's <c>onStartGame</c> event and, as a fallback,
+	/// after <c>GameState.StartGame</c>; only the first call per match counts.
+	/// </summary>
 	public static void MatchStarted() {
+		if (MatchRunning) return;
 		TraceDataEvents("match start"); CoreLog.Trace($"match started (inLobby={InLobby}, host={IsHost}, rules={LobbyRuleRegistry.All.Count})");
 		MatchRunning = true;
 		LobbyRuleRegistry.FreezeAll();
-		ModCore.Lobby.RaiseMatchStarted();
+		ModCore.Match.RaiseStarted();
 	}
 
 	/// <summary>Back in the lobby or the menu: rules follow the lobby again (or fall back to their defaults outside one).</summary>
 	public static void MatchEnded() {
+		MatchState.Clear();
 		if (!MatchRunning) return;
 		TraceDataEvents("match end"); CoreLog.Trace("match ended");
 		MatchRunning = false;
 		LobbyRuleRegistry.UnfreezeAll();
-		ModCore.Lobby.RaiseMatchEnded();
+		ModCore.Match.RaiseEnded();
 	}
 
 	// ------------------------------------------------------------------ members

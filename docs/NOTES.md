@@ -5,7 +5,8 @@
 - The game uses Facepunch.Steamworks (interop `Fivemid.FiveSteam.dll`). The interop has no `event` members, so the static events of `SteamMatchmaking` are subscribed with the `add_OnLobby...` methods
   (`OnLobbyEntered`, `OnLobbyDataChanged`, `OnLobbyMember{DataChanged,Joined,Leave,Disconnected,Kicked,Banned}`), next to the game's own subscriptions. Steam starts after the plugins load, so the runner tick subscribes once `SteamClient.IsValid`.
 - Steam sends nothing when the local player leaves a lobby, so the 4 Hz tick also checks `Lobby.MemberCount` and the owner. `Lobby.Members` is an IL2CPP `IEnumerable<Friend>`, enumerated with `GetEnumerator/MoveNext`.
-- The match starts in `GameState.StartGame` (host directly, clients through `StartGameRPC`), which is where rules freeze (`MatchStarted`); `GameState.OnDisable` unfreezes them (`MatchEnded`).
+- The match starts in `GameState.StartGame` (host directly, clients through `StartGameRPC`), which invokes the game's `onStartGame` event: that is where rules freeze (`Match.Started`; a postfix on `StartGame` is the fallback, only the first call per match counts). The GameState is **not** destroyed or disabled when a match ends (its `OnDisable` only runs when the game quits): back to menu, disconnect and leaving the lobby all call `GameState.FullReset` (log line "Game State Reset."), so a postfix there unfreezes the rules (`Match.Ended`) and raises `Match.Reset`. `FullReset` invokes the game's `onReset` field too, but a handler added to that field was not called in testing, so the postfix is used.
+- `Match` events: ModCore adds its handlers to the game's own `GameState` Action fields (`onIslandSpawned, onStartGame, onEnterPhase, onSyncPhase, onEndGame, onRejoin`) in a postfix on `GameState.Awake`, next to the game's handlers (Delegate.Combine). `TurnPhase.Enter` sets `GameState.TurnPhase` before it invokes `onEnterPhase`, so the phase is read there by comparing it with `startPhase` ... `winPhase`.
 - Rule data: lobby data `modcore.rule.<key>` ("1"/"0" for toggles, invariant integers for numbers). Member data `modcore.mods` is `v1;<id>|<name>|<version>|<key>,<key>;...`.
 
 ## Civilizations
@@ -30,3 +31,16 @@
 The game writes its own lobby and member data several times a second (a solo match with AIs produced over 100 `OnLobbyDataChanged` / `OnLobbyMemberDataChanged` events in a few minutes).
 So `OnDataChanged` only re-evaluates the rules, and `Lobby.Changed` is raised for membership and owner changes only. Set `[Debug] LogLobbyEvents = true` in `DiceModders.ModCore.cfg`
 to trace the events; the data events are summarised as one counter line per lobby/match phase.
+
+## Players and messages
+
+- `Player.AI` (`Nullable<AIState>`, a struct with two array fields) comes back as garbage through the interop. `MatchPlayer.Difficulty/Strategy` read the field directly: `Player.ai` at 0xD0 is a `NetworkedVar<Opt<AIState>>`, its value at +0x38 (`hasValue` +0x38, `Difficulty` +0x40, `Strategy` +0x44; from `Player.get_AI`, v1.0.4). Values outside the enum range are treated as a changed layout and reported as null.
+- The AI picks its strategy and build order when the Start phase ends; before that the value is the default.
+- With fewer than two humans the game sets `LobbySettings.timerSpeed` to UNLIMITED at match start.
+- `Log.AddMessage(StructuredText)` only works on the server. `GameText` builds the `StructuredText` from `FormattableStringFactory.Create("{0}{1}..", args)`: `Il2CppSystem.String` holes become text with `{r.gold}`-style tokens parsed, `Player` holes become coloured names.
+
+## Own building models
+
+- `CivilizationSkins.BuildingModel`: on the first `GetBuildingVisualPrefab` lookup for the type, the look-alike prefab (`__result`) is copied with `Object.Instantiate` under an inactive `DontDestroyOnLoad` object (the copy never wakes up). Body MeshFilters are named `<building>-<civ>-mesh_LOD<n>` under `Visual` and `Damaged Visual`; some prefabs hold two LOD groups (`Castle Viking`: europe + viking), so only the group of the look-alike civilization is filled and the others get an empty mesh (two filled groups z-fight). `flag-big` is moved. Materials stay. No `BuildingVisual.Apply` patch is needed: the game instantiates the copy everywhere.
+- 2D pictures: `BuildingVisual.Icon(color)` returns `icons[color.Index]` with no fallback, and every UI place (lobby card, player summary, scoreboard, end screen, build menu, Rules screen, text icons) calls it. The copy gets its own 12-entry array (checked length, no nulls); the original prefab is never touched.
+- `Mesh.RecalculateNormals` is stripped in this build, so `Tools.Meshes` computes normals itself.

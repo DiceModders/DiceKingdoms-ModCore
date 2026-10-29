@@ -9,6 +9,7 @@ internal static class Core {
 		_done = true;
 		CoreRunner.Spawn();
 		LobbyHooks.Install();
+		MatchState.Install();
 		CivilizationHooks.Install();
 		CoreLog.Info("ModCore ready");
 	}

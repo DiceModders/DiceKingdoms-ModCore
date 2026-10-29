@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
+using UnityEngine;
 using GameBuildingType = DiceKingdoms.Game.BuildingType;
 using GameBuildingTypeName = DiceKingdoms.Game.BuildingTypeName;
 using GameBuildingVisual = DiceKingdoms.Game.BuildingVisual;
@@ -31,6 +32,108 @@ public sealed class CivilizationSkins {
 	public CivilizationSkins Nature(GameNatureTile tile, GameNatureVisualHub prefab) { NatureTiles[(int)tile] = prefab; return this; }
 	/// <summary>The ship model.</summary>
 	public CivilizationSkins Ship(GameShipVisual prefab) { ShipPrefab = prefab; return this; }
+
+	internal sealed class ModelEntry {
+		public Mesh Mesh;
+		public Vector3? FlagPosition;
+		public float FlagYaw;
+		public Sprite[] Icons;
+		public GameBuildingVisual Built;   // the prepared prefab, made on first use
+	}
+	internal readonly Dictionary<int, ModelEntry> BuildingModels = new();
+
+	/// <summary>
+	/// A building that looks like the <c>skinsLike</c> civilization's one but with your own body mesh. On first use ModCore copies that building's prefab,
+	/// puts <paramref name="mesh"/> into it (normal and damaged look, one LOD group; the others are blanked so nothing overlaps) and uses the copy for this
+	/// civilization everywhere the game shows the building. The game's materials stay, so player colours, tints and the burnt look keep working; give the
+	/// mesh UVs on the game's 8x8 colour palette. Footprint, rules and effects (fire anchors, inhabitants) stay those of the original building. The mesh is
+	/// in the prefab's own space; <paramref name="flagPosition"/> / <paramref name="flagYaw"/> move the building's big flag (castles) to stand on your model.
+	/// A <see cref="Building"/> prefab for the same type wins over this. Build the mesh with <see cref="Tools.Meshes"/>.
+	/// <para><paramref name="icons"/>: the building's 2D pictures, one per player colour in the game's colour order (12; see
+	/// <see cref="Tools.Sprites.LoadPlayerColorSet"/>). The game shows them in the lobby, the player summary, the scoreboard, the end screen, the build
+	/// menu, the Rules screen and in texts. Without them the look-alike building's pictures stay.</para>
+	/// </summary>
+	public CivilizationSkins BuildingModel(GameBuildingTypeName type, Mesh mesh, Vector3? flagPosition = null, float flagYaw = 0f, Sprite[] icons = null) {
+		if (mesh == null) { BuildingModels.Remove((int)type); return this; }
+		BuildingModels[(int)type] = new ModelEntry { Mesh = mesh, FlagPosition = flagPosition, FlagYaw = flagYaw, Icons = icons };
+		return this;
+	}
+}
+
+/// <summary>Makes the prefab copies for <see cref="CivilizationSkins.BuildingModel"/>. They live under one inactive, persistent object.</summary>
+internal static class CivilizationModels {
+	private static readonly string[] CivTokens = { "europe", "middle-east", "viking", "ancient", "maya" };   // mesh names: "<building>-<civ>-mesh_LOD0"
+	private static Transform _staging;
+
+	public static GameBuildingVisual Get(ModCivilization civ, GameBuildingTypeName type, CivilizationSkins.ModelEntry model, GameBuildingVisual basePrefab) {
+		if (model.Built != null) return model.Built;   // Unity null check: rebuilt if it was ever destroyed
+		if (basePrefab == null) return null;
+		var copy = UnityEngine.Object.Instantiate(basePrefab, Staging());
+		copy.name = basePrefab.name;   // keep the game's naming ("Castle Viking"), tools and pooling expect it
+
+		string own = civ.SkinsLike >= 0 && civ.SkinsLike < CivTokens.Length ? CivTokens[civ.SkinsLike] : "europe";
+		var filters = copy.GetComponentsInChildren<MeshFilter>(true);
+		string ownGroup = null, firstGroup = null;
+		foreach (var mf in filters) {
+			string group = GroupOf(mf.gameObject.name);
+			if (group == null) continue;
+			firstGroup ??= group;
+			if (ownGroup == null && group.EndsWith("-" + own, StringComparison.Ordinal)) ownGroup = group;
+		}
+		ownGroup ??= firstGroup;
+
+		int filled = 0, blanked = 0;
+		bool flag = false;
+		foreach (var mf in filters) {
+			string name = mf.gameObject.name;
+			string group = GroupOf(name);
+			if (group != null) {
+				// Some prefabs hold two LOD groups (Castle Viking has castle-europe and castle-viking parts): fill one, blank the rest, or the copies z-fight.
+				if (group == ownGroup) { mf.sharedMesh = model.Mesh; filled++; }
+				else { mf.sharedMesh = Tools.Meshes.Empty; blanked++; }
+			}
+			else if (name == "flag-big" && model.FlagPosition.HasValue) {
+				mf.transform.localPosition = model.FlagPosition.Value;
+				mf.transform.localRotation = Quaternion.Euler(0f, model.FlagYaw, 0f);
+				flag = true;
+			}
+		}
+		bool icons = SetIcons(copy, model.Icons, civ, type);
+		model.Built = copy;
+		CoreLog.Info("civilization '" + civ.Name + "': own model for " + type + " made from '" + basePrefab.name + "' (meshes " + filled + ", blanked " + blanked + ", flag moved " + flag + ", icons " + icons + ")");
+		return copy;
+	}
+
+	/// <summary>
+	/// <c>BuildingVisual.Icon(color)</c> returns <c>icons[color.Index]</c> with no fallback, so the array must keep the original's length and order
+	/// (one per player colour). Our copy gets its own array; the look-alike's prefab is never touched.
+	/// </summary>
+	private static bool SetIcons(GameBuildingVisual copy, Sprite[] icons, ModCivilization civ, GameBuildingTypeName type) {
+		if (icons == null) return false;
+		int needed = copy.icons != null ? copy.icons.Length : 0;
+		if (icons.Length != needed || Array.IndexOf(icons, null) >= 0) {
+			CoreLog.Warn("civilization '" + civ.Name + "': " + type + " icons ignored, need " + needed + " sprites (one per player colour), got " + icons.Length);
+			return false;
+		}
+		copy.icons = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<Sprite>(icons);
+		return true;
+	}
+
+	/// <summary>"castle-viking-mesh_LOD1" -> "castle-viking"; null for other objects.</summary>
+	private static string GroupOf(string objectName) {
+		int i = objectName.IndexOf("-mesh_LOD", StringComparison.Ordinal);
+		return i > 0 ? objectName.Substring(0, i) : null;
+	}
+
+	private static Transform Staging() {
+		if (_staging != null) return _staging;
+		var go = new GameObject("DiceModders ModCore Models");
+		go.SetActive(false);                       // copies under it never wake up or render; the game's own Instantiate makes active instances
+		go.hideFlags = HideFlags.HideAndDontSave;
+		UnityEngine.Object.DontDestroyOnLoad(go);
+		_staging = go.transform;
+		return _staging;
+	}
 }
 
 /// <summary>
@@ -65,7 +168,13 @@ internal static class CivilizationSkinHooks {
 	public static void BuildingPostfix(GameBuildingType buildingType, ref GameBuildingVisual __result) {
 		try {
 			var civ = Registered("building");
-			if (civ != null && buildingType != null && civ.Skins.Buildings.TryGetValue((int)buildingType.name, out var prefab) && prefab != null) __result = prefab;
+			if (civ == null || buildingType == null) return;
+			int type = (int)buildingType.name;
+			if (civ.Skins.Buildings.TryGetValue(type, out var prefab) && prefab != null) { __result = prefab; return; }
+			if (civ.Skins.BuildingModels.TryGetValue(type, out var model)) {
+				var built = CivilizationModels.Get(civ, buildingType.name, model, __result);   // __result is the look-alike civilization's prefab
+				if (built != null) __result = built;
+			}
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:b", "building skin hook: " + e.Message); }
 	}

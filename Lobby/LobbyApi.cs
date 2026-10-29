@@ -138,7 +138,7 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 
 public static partial class ModCore {
 	/// <summary>
-	/// The Steam lobby the game is in: who is in it, who hosts it, when the match starts, and rules the host can set for everybody.
+	/// The Steam lobby the game is in: who is in it, who hosts it, and rules the host can set for everybody. The match itself is <see cref="Match"/>.
 	/// Everything here is read on the main thread. The state comes from the game's own Steam matchmaking (Facepunch.Steamworks) events.
 	/// </summary>
 	public static class Lobby {
@@ -147,9 +147,6 @@ public static partial class ModCore {
 
 		/// <summary>True when the local player owns the lobby.</summary>
 		public static bool IsHost { get { Core.Ensure(); return LobbyState.IsHost; } }
-
-		/// <summary>True from the moment the lobby turns into a match until the lobby or menu is shown again.</summary>
-		public static bool MatchRunning { get { Core.Ensure(); return LobbyState.MatchRunning; } }
 
 		/// <summary>The local Steam id; 0 when Steam is not available.</summary>
 		public static ulong LocalSteamId { get { Core.Ensure(); return LobbyState.LocalSteamId; } }
@@ -164,17 +161,7 @@ public static partial class ModCore {
 		public static event Action Changed { add { Core.Ensure(); _changed += value; } remove { _changed -= value; } }
 		private static Action _changed;
 
-		/// <summary>The lobby turned into a match. Rules are frozen when this is raised.</summary>
-		public static event Action MatchStarted { add { Core.Ensure(); _matchStarted += value; } remove { _matchStarted -= value; } }
-		private static Action _matchStarted;
-
-		/// <summary>The match is over: back in the lobby or the menu. Rules follow the lobby again.</summary>
-		public static event Action MatchEnded { add { Core.Ensure(); _matchEnded += value; } remove { _matchEnded -= value; } }
-		private static Action _matchEnded;
-
 		internal static void RaiseChanged() => Raise(_changed, "Lobby.Changed");
-		internal static void RaiseMatchStarted() => Raise(_matchStarted, "Lobby.MatchStarted");
-		internal static void RaiseMatchEnded() => Raise(_matchEnded, "Lobby.MatchEnded");
 
 		private static void Raise(Action handler, string what) {
 			if (handler == null) return;

@@ -45,8 +45,8 @@ public class MyModPlugin : BasePlugin {
         _meteors = Core.Lobby.Rules.Toggle("mymod.meteors", "Meteors", true, "Disasters hit the islands.");
         _meteors.Changed += v => Log.LogInfo($"meteors: {v}");
 
-        Core.Lobby.MatchStarted += () => Log.LogInfo($"match started, meteors = {_meteors.Value}");
-        Core.Lobby.MatchEnded   += () => Log.LogInfo("match over");
+        Core.Match.Started += () => Log.LogInfo($"match started, meteors = {_meteors.Value}");
+        Core.Match.Ended   += () => Log.LogInfo("match over");
 
         // A civilization the game accepts. Provide the tech tree yourself.
         Core.Civilizations.Add("example.mycivilization", "My civilization", () => null, skinsLike: 2);

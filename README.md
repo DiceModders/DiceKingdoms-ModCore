@@ -20,10 +20,15 @@ settings box, civilizations in the Rules drop-down).
 | You want | Use |
 |---|---|
 | Know whether the player is in a Steam lobby, who is in it and who hosts it | `ModCore.Lobby.InLobby / IsHost / Members / Changed` |
-| React when the lobby turns into a match (and when it is over) | `ModCore.Lobby.MatchStarted / MatchEnded` |
+| React when the match starts, a phase begins or ends, somebody wins, the match screen closes | `ModCore.Match.Started / PhaseEntered / PhaseSynced / GameOver / Ended` |
+| Know the current phase and turn | `ModCore.Match.Phase / Turn / Running` |
+| Read the lobby's match settings (timer, multi meteor, teams, wonder victory), solo or tutorial | `ModCore.Match.Settings`, `Match.IsSolo`, `Match.IsTraining` |
+| List the players (humans and AI): name, AI difficulty, civilization, colour, team, island, defeated | `ModCore.Players.All / Local / Host / Find(id)` |
+| Give a mod civilization its own building models and pictures | `civ.Skins.BuildingModel(type, mesh, flag, yaw, icons)`, `Tools.Meshes`, `Tools.Sprites` |
 | A setting the host chooses in the lobby and everybody follows | `ModCore.Lobby.Rules.Toggle / Number` |
 | Find out who in the lobby lacks a mod (desync warning) | `ModCore.Lobby.Compatibility.Warnings` |
 | Add a civilization the game accepts (tech tree, skins) | `ModCore.Civilizations.Add(...)` |
+| Patch game methods by name with OK/FAIL logging, find game types, call private members | `DiceModders.ModCore.Tools`: `Patcher`, `GameTypes`, `Reflect`, `Mem` |
 
 ---
 
@@ -79,20 +84,19 @@ if (Core.Lobby.InLobby && Core.Lobby.IsHost) { /* ... */ }
 foreach (LobbyMember m in Core.Lobby.Members)
     Log($"{m.Name} id={m.SteamId} host={m.IsHost} me={m.IsLocal}");
 
-Core.Lobby.Changed      += () => Refresh();   // joined/left, member joined/left/kicked, owner changed (rule values: use rule.Changed)
-Core.Lobby.MatchStarted += () => Freeze();    // the lobby turned into a match (runs on every machine)
-Core.Lobby.MatchEnded   += () => Unfreeze();  // back in the lobby or the menu
+Core.Lobby.Changed += () => Refresh();   // joined/left, member joined/left/kicked, owner changed (rule values: use rule.Changed)
 ```
 
 | Member | Meaning |
 |---|---|
 | `InLobby` | The local player is in a Steam lobby. |
 | `IsHost` | The local player owns the lobby. |
-| `MatchRunning` | A match is in progress (between `MatchStarted` and `MatchEnded`). |
 | `Members` | `IReadOnlyList<LobbyMember>`: `SteamId`, `Name`, `IsHost`, `IsLocal`, `IsConnected`. |
 | `LocalSteamId` | The local Steam id (0 without Steam). |
 | `Current` | The raw `Steamworks.Data.Lobby?` for anything ModCore does not wrap. |
-| `Changed`, `MatchStarted`, `MatchEnded` | Events, raised on the main thread. |
+| `Changed` | Event, raised on the main thread. |
+
+When the lobby turns into a match and back, see [Match](#match).
 
 Limits worth knowing: a lobby entered **before** ModCore loaded is not seen (ModCore loads at game start, so this only matters for hot-reloading). Steam sends no event when the local
 player leaves a lobby, so ModCore polls four times a second; `Changed` therefore arrives up to 250 ms late in that one case.
@@ -135,6 +139,56 @@ Every client publishes its rule keys and mod versions in its Steam member data (
 `Core.Lobby.Compatibility.Warnings` contains a line such as `"Alice does not have Meteors, this rule may desync."`. `Core.Lobby.Compatibility.IsCompatible` is `Warnings.Count == 0`.
 Screens (ModBridge) show these lines; your mod can also block a start button or log them.
 
+## Match
+
+Everything about the running match. The events come from the game's own `GameState` events, so they are raised on every machine (host and clients), on the main thread.
+
+```csharp
+Core.Match.Started      += () => Log("match started");            // lobby rules are frozen before this
+Core.Match.PhaseEntered += phase => Log($"turn {Core.Match.Turn}: {phase}");
+Core.Match.PhaseSynced  += phase => Log($"{phase} ends, actions are applied now");
+Core.Match.GameOver     += () => Log("somebody won");             // the match screen is still open
+Core.Match.Ended        += () => Log("back in the lobby or menu"); // lobby rules follow the lobby again
+```
+
+| Member | Meaning |
+|---|---|
+| `Running` | Between `Started` and `Ended`. Lobby rules are frozen while it is true. |
+| `Phase` | `MatchPhase`: `None`, `Start` (placing the first buildings, once), then every turn `Harvest`, `Disasters`, `Build`, `Combat`, `Win` (skipped when nobody is about to win). |
+| `Turn` | Turn number from 1; goes up when `Win` wraps back to `Harvest`. 0 outside a match. |
+| `IslandsSpawned` | Every player has loaded the islands; the match is about to start. |
+| `Started` | The match started. |
+| `PhaseEntered(phase)` | A phase began; `Phase` is already the new one. |
+| `PhaseSynced(phase)` | The phase's time ran out or everybody was ready: the planned actions are applied now. AI players make their moves at this moment. |
+| `GameOver` | Somebody won. Players can stay and watch. |
+| `Rejoined` | This machine reconnected to a running match. |
+| `Reset` | The game reset its match state. |
+| `Ended` | The match screen closed. |
+| `Settings` | The game's own match settings, read live: `TimerSpeed` (`Fast`, `Slow`, `Unlimited`), `MultiMeteor`, `Teams`, `WonderVictory`. With fewer than two humans the game itself switches the timer to `Unlimited` when the match starts. |
+| `IsSolo`, `IsTraining` | Fewer than two humans (no phase timer, developer commands work); the tutorial match. |
+
+## Players
+
+The players of the lobby screen and the match, humans and AI, from the game's own list (`Lobby.Members` is the Steam lobby: humans only).
+
+```csharp
+foreach (MatchPlayer p in Core.Players.All)
+    Log($"{p.Name} ai={p.IsAI} {p.Difficulty} {p.CivilizationName} {p.ColorName} team={p.Team} defeated={p.IsDefeated}");
+MatchPlayer me = Core.Players.Local, host = Core.Players.Host;
+```
+
+| `MatchPlayer` | Meaning |
+|---|---|
+| `Id` | Stable id: the Steam id for humans, a made-up id counting down from `ulong.MaxValue` for AI. The game recognises a reconnecting player by it. |
+| `Name`, `IsAI`, `IsLocal`, `IsHost` | Display name (AI: "Red Peasant"), and who it is. |
+| `Difficulty`, `Strategy` | AI only (`AiDifficulty` Passive..Sorcerer, `AiStrategy` Military/Wonder); null for humans. The strategy is picked when the Start phase ends. |
+| `Civilization`, `CivilizationName` | 0..4 built in, 5..127 mod civilizations (their own name). |
+| `ColorIndex`, `ColorName`, `Color`, `Team` | Player colour (0 Red .. 11 Purple) and team (colours in groups of three; meaningful with `Settings.Teams`). |
+| `Island`, `IsDefeated`, `IsConnected` | The island once spawned, defeat, connection (AI always false). |
+| `Game`, `IsValid` | The game's own `Player` for anything not wrapped; false once the game removed the player. |
+
+Values are read live, so keep the `MatchPlayer` and read it when you need it. `Difficulty`/`Strategy` are read from the game's field directly (the interop copy of that struct is broken); if a game update moves it they report null rather than a wrong value.
+
 ## Civilizations
 
 ```csharp
@@ -167,8 +221,40 @@ Your mod provides what is its own: `civ.Skins` (building, unit, nature and ship 
 edit), and the name. See the wiki page *Making a civilization* for the step by step guide, every asset a civilization can have and what cannot be changed (biome, AI build orders, 5..127).
 `Civilizations.All`, `Added`, `Removed` and `civ.Remove()` exist for tools. To make the civilization selectable on the Rules screen, players install ModBridge.
 
+### Own building models
+
+```csharp
+Mesh castle = Tools.Meshes.LoadDkmesh(path, out var flag, out float yaw);          // or Tools.Meshes.Create(name, vertices, uvs, triangles)
+Sprite[] icons = Tools.Sprites.LoadPlayerColorSet(iconFolder);                      // 00.png .. 11.png, one per player colour
+civ.Skins.BuildingModel(BuildingTypeName.CASTLE, castle, flag, yaw, icons);
+```
+
+On the first lookup ModCore copies the `skinsLike` civilization's building prefab once, puts the mesh into the normal and damaged look (one LOD group, the others blanked so nothing overlaps), moves the big flag, gives the copy the 12 pictures and returns it for your civilization. The game then uses it everywhere: in the match, pooled copies, the burnt state, and (through the pictures) the lobby card, player summary, scoreboard, end screen, build menu, Rules screen and texts. The game's materials stay, so player colours, tints and the burnt look keep working: give the mesh UVs on the game's 8x8 colour palette, in the prefab's own space. Footprint, rules and effects stay those of the original building. Pictures must be exactly one per player colour in the game's order (0 Red, 1 Pink, 2 Orange, 3 Green, 4 Carribean, 5 Cyan, 6 Yellow, 7 Ivory, 8 Brown, 9 Blue, 10 Grey, 11 Purple), 237x235 px like the game's own; otherwise they are ignored with a warning. A `Skins.Building(type, prefab)` for the same type wins over a model.
+
 `[Debug] DumpGameData = true` in the ModCore config makes ModCore write `BepInEx/ModCore-game-data.txt` (technologies, tech trees, building types, the skin registry, prefabs) and
 `BepInEx/ModCore-sprites.txt` (every sprite) once the game has loaded: the reference for finding the game's own prefabs and sprites to copy.
+
+## Tools
+
+Small helpers almost every mod needs, in the namespace `DiceModders.ModCore.Tools`. They work without `ModCore.Init()`.
+
+| Type | What it does |
+|---|---|
+| `Patcher` | `new Patcher("my.mod", Log)`, then `Patch("GameState", "ChangeTurnPhase", typeof(MyPatches), postfix: "AfterPhase")` (private methods too; or pass a `Type`). Logs `[patch] OK` / `[patch] FAIL` with a hint when a type or method was renamed in a game update, and never throws. `Summary()` logs the count; `Harmony` gives the instance for anything else. |
+| `GameTypes` | `Find("IslandGrid")` finds a game type by simple or full name in `BepInEx\interop`; `Suggest` / `SuggestMethods` list similar names. |
+| `Reflect` | `Call(obj, "Method", args)`, `TryGetMember`, `TrySetMember`, `CallStatic`, `Wrap(type, pointer)`: name-based access to interop objects, private members included. A plain `int` is accepted for enum parameters. |
+| `Mem` | Raw reads/writes at a field offset (`ReadInt`, `WriteInt`, `ReadPtr`, `Str`, `ArrayLength`, `ArrayElem`). Offsets change with every game build; use only for members the interop does not expose, never for encrypted values (resource storage). |
+
+```csharp
+using DiceModders.ModCore.Tools;
+
+var patcher = new Patcher("com.example.mymod", Log);
+patcher.Patch("GameState", "ChangeTurnPhase", typeof(MyPatches), postfix: nameof(MyPatches.AfterPhase));
+patcher.Summary();
+```
+
+ModCore also switches off **QuickEdit** on the BepInEx console window at start (config `[General] DisableConsoleQuickEdit`, on by default). With QuickEdit on, one click
+inside the console pauses the game until Enter is pressed.
 
 ---
 
@@ -196,13 +282,16 @@ The interop folder exists after the first game start with BepInEx 6 installed (i
 | `CoreRunner.cs` | A `MonoBehaviour` that ticks the lobby state four times a second. |
 | `Lobby/LobbyApi.cs` | The public lobby, rules and compatibility API (`ModCore.Lobby`). |
 | `Lobby/LobbyState.cs` | Steam subscription, members, owner, match start/end, freezing. |
-| `Lobby/LobbyHooks.cs` | Harmony patches on `GameState.StartGame` / `OnDisable`. |
+| `Lobby/LobbyHooks.cs` | Harmony patches on `GameState.StartGame` / `FullReset` (match start and end). |
 | `Lobby/LobbyRuleRegistry.cs`, `LobbyMods.cs` | Rule registry, the `modcore.mods` format, which plugin registered a rule. |
 | `Civilizations/CivilizationsApi.cs` | Public API (`Add`, `CloneTree`, registry). |
 | `Civilizations/CivilizationHooks.cs` | The patches that make unknown civilization numbers safe (tree, skins, network readers, castle click, AI, `Statistics`, guard). |
 | `Civilizations/CivilizationSkins.cs` | `civ.Skins` (own models) and the skin lookup patches. |
 | `Civilizations/CivilizationText.cs` | Adds the civilization names to the game's text table. |
 | `Civilizations/GameDataDump.cs` | The `DumpGameData` developer tool. |
+| `Match/MatchApi.cs`, `MatchState.cs`, `MatchSettings.cs` | The public match API (`ModCore.Match`, `MatchPhase`, `MatchSettings`) and the listeners on the game's `GameState` events. |
+| `Players/PlayersApi.cs` | `ModCore.Players` and `MatchPlayer`. |
+| `Tools/` | Public helpers `Patcher`, `GameTypes`, `Reflect`, `Mem`, `Meshes`, `Sprites`, and the console `ConsoleGuard`. |
 | `docs/NOTES.md` | How it works inside and why (read before changing the hooks). |
 | `docs/EXAMPLE_MOD.md` | A complete minimal mod. |
 
