@@ -33,6 +33,18 @@ public sealed class CivilizationSkins {
 	/// <summary>The ship model.</summary>
 	public CivilizationSkins Ship(GameShipVisual prefab) { ShipPrefab = prefab; return this; }
 
+	internal readonly List<(int x, int y, Color c)> GroundCells = new(), NatureCells = new();
+	internal bool HasIslandColours => GroundCells.Count > 0 || NatureCells.Count > 0;
+
+	/// <summary>
+	/// Recolours a cell of the game's 8x8 colour palette (x from the left, y from the bottom) on this civilization's island ground: for example the
+	/// borrowed biome's grass cells. The game picks the cells per biome (PLAINS (1,1)/(4,0), DESERT (4,1)/(4,2), SNOW (4,3)/(4,4), MEDITERRANEAN (5,3)/(5,4),
+	/// JUNGLE (6,3)/(6,4); cliffs (0,2), desert cliffs (0,3)). Visual and local.
+	/// </summary>
+	public CivilizationSkins GroundColour(int x, int y, Color colour) { GroundCells.RemoveAll(c => c.x == x && c.y == y); GroundCells.Add((x, y, colour)); return this; }
+	/// <summary>The same for the mountains (inner cliffs), trees and flowers on this civilization's islands (snow models: (2,2) snow, (0,2) cliff body).</summary>
+	public CivilizationSkins NatureColour(int x, int y, Color colour) { NatureCells.RemoveAll(c => c.x == x && c.y == y); NatureCells.Add((x, y, colour)); return this; }
+
 	internal sealed class ModelEntry {
 		public Mesh Mesh;
 		public Vector3? FlagPosition;
@@ -63,15 +75,13 @@ public sealed class CivilizationSkins {
 /// <summary>Makes the prefab copies for <see cref="CivilizationSkins.BuildingModel"/>. They live under one inactive, persistent object.</summary>
 internal static class CivilizationModels {
 	private static readonly string[] CivTokens = { "europe", "middle-east", "viking", "ancient", "maya" };   // mesh names: "<building>-<civ>-mesh_LOD0"
-	private static Transform _staging;
 
-	public static GameBuildingVisual Get(ModCivilization civ, GameBuildingTypeName type, CivilizationSkins.ModelEntry model, GameBuildingVisual basePrefab) {
+	public static GameBuildingVisual Get(string civName, int look, GameBuildingTypeName type, CivilizationSkins.ModelEntry model, GameBuildingVisual basePrefab) {
 		if (model.Built != null) return model.Built;   // Unity null check: rebuilt if it was ever destroyed
 		if (basePrefab == null) return null;
-		var copy = UnityEngine.Object.Instantiate(basePrefab, Staging());
-		copy.name = basePrefab.name;   // keep the game's naming ("Castle Viking"), tools and pooling expect it
+		var copy = Tools.Prefabs.Copy(basePrefab);   // keeps the game's naming ("Castle Viking"), tools and pooling expect it
 
-		string own = civ.SkinsLike >= 0 && civ.SkinsLike < CivTokens.Length ? CivTokens[civ.SkinsLike] : "europe";
+		string own = look >= 0 && look < CivTokens.Length ? CivTokens[look] : "europe";
 		var filters = copy.GetComponentsInChildren<MeshFilter>(true);
 		string ownGroup = null, firstGroup = null;
 		foreach (var mf in filters) {
@@ -98,9 +108,9 @@ internal static class CivilizationModels {
 				flag = true;
 			}
 		}
-		bool icons = SetIcons(copy, model.Icons, civ, type);
+		bool icons = SetIcons(copy, model.Icons, civName, type);
 		model.Built = copy;
-		CoreLog.Info("civilization '" + civ.Name + "': own model for " + type + " made from '" + basePrefab.name + "' (meshes " + filled + ", blanked " + blanked + ", flag moved " + flag + ", icons " + icons + ")");
+		CoreLog.Info("civilization '" + civName + "': own model for " + type + " made from '" + basePrefab.name + "' (meshes " + filled + ", blanked " + blanked + ", flag moved " + flag + ", icons " + icons + ")");
 		return copy;
 	}
 
@@ -108,11 +118,11 @@ internal static class CivilizationModels {
 	/// <c>BuildingVisual.Icon(color)</c> returns <c>icons[color.Index]</c> with no fallback, so the array must keep the original's length and order
 	/// (one per player colour). Our copy gets its own array; the look-alike's prefab is never touched.
 	/// </summary>
-	private static bool SetIcons(GameBuildingVisual copy, Sprite[] icons, ModCivilization civ, GameBuildingTypeName type) {
+	private static bool SetIcons(GameBuildingVisual copy, Sprite[] icons, string civName, GameBuildingTypeName type) {
 		if (icons == null) return false;
 		int needed = copy.icons != null ? copy.icons.Length : 0;
 		if (icons.Length != needed || Array.IndexOf(icons, null) >= 0) {
-			CoreLog.Warn("civilization '" + civ.Name + "': " + type + " icons ignored, need " + needed + " sprites (one per player colour), got " + icons.Length);
+			CoreLog.Warn("civilization '" + civName + "': " + type + " icons ignored, need " + needed + " sprites (one per player colour), got " + icons.Length);
 			return false;
 		}
 		copy.icons = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<Sprite>(icons);
@@ -123,16 +133,6 @@ internal static class CivilizationModels {
 	private static string GroupOf(string objectName) {
 		int i = objectName.IndexOf("-mesh_LOD", StringComparison.Ordinal);
 		return i > 0 ? objectName.Substring(0, i) : null;
-	}
-
-	private static Transform Staging() {
-		if (_staging != null) return _staging;
-		var go = new GameObject("DiceModders ModCore Models");
-		go.SetActive(false);                       // copies under it never wake up or render; the game's own Instantiate makes active instances
-		go.hideFlags = HideFlags.HideAndDontSave;
-		UnityEngine.Object.DontDestroyOnLoad(go);
-		_staging = go.transform;
-		return _staging;
 	}
 }
 
@@ -160,45 +160,57 @@ internal static class CivilizationSkinHooks {
 		catch (Exception e) { CoreLog.Error("PlayerSkins." + method + " postfix failed: " + e); }
 	}
 
-	private static ModCivilization Registered(string what) {
-		int id = PlayerSkinsLookHooks.RealId;
-		return id < 0 ? null : CivilizationRegistry.Find(id);
+	/// <summary>
+	/// Whose models apply to this lookup: a registered civilization (its real number is in <see cref="PlayerSkinsLookHooks.RealId"/> while its borrowed one
+	/// runs the game's lookup) or a built-in civilization a mod reskinned (<see cref="ModCore.Civilizations.Reskin"/>). A registered civilization never
+	/// inherits the reskin of the civilization it looks like: what it leaves out shows the game's original look.
+	/// </summary>
+	private static bool Resolve(GamePlayerSkins skins, out CivilizationSkins result, out string name, out int look) {
+		result = null; name = null; look = 0;
+		int real = PlayerSkinsLookHooks.RealId;
+		if (real >= 0) {
+			var civ = CivilizationRegistry.Find(real);
+			if (civ == null) return false;
+			result = civ.Skins; name = civ.Name; look = civ.SkinsLike;
+			return true;
+		}
+		if (skins == null) return false;
+		int id = (int)skins.civilization;
+		if (id < 0 || id >= CivilizationRegistry.BuiltInSkins.Length || CivilizationRegistry.BuiltInSkins[id] == null) return false;
+		result = CivilizationRegistry.BuiltInSkins[id]; name = ((DiceKingdoms.Interface.Civilization)id).ToString(); look = id;
+		return true;
 	}
 
-	public static void BuildingPostfix(GameBuildingType buildingType, ref GameBuildingVisual __result) {
+	public static void BuildingPostfix(GamePlayerSkins __instance, GameBuildingType buildingType, ref GameBuildingVisual __result) {
 		try {
-			var civ = Registered("building");
-			if (civ == null || buildingType == null) return;
+			if (buildingType == null || !Resolve(__instance, out var skins, out var name, out int look)) return;
 			int type = (int)buildingType.name;
-			if (civ.Skins.Buildings.TryGetValue(type, out var prefab) && prefab != null) { __result = prefab; return; }
-			if (civ.Skins.BuildingModels.TryGetValue(type, out var model)) {
-				var built = CivilizationModels.Get(civ, buildingType.name, model, __result);   // __result is the look-alike civilization's prefab
+			if (skins.Buildings.TryGetValue(type, out var prefab) && prefab != null) { __result = prefab; return; }
+			if (skins.BuildingModels.TryGetValue(type, out var model)) {
+				var built = CivilizationModels.Get(name, look, buildingType.name, model, __result);   // __result is the look-alike civilization's prefab
 				if (built != null) __result = built;
 			}
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:b", "building skin hook: " + e.Message); }
 	}
 
-	public static void UnitPostfix(object unitType, ref GameUnitVisual __result) {
+	public static void UnitPostfix(GamePlayerSkins __instance, object unitType, ref GameUnitVisual __result) {
 		try {
-			var civ = Registered("unit");
-			if (civ != null && civ.Skins.Units.TryGetValue(Convert.ToInt32(unitType), out var prefab) && prefab != null) __result = prefab;
+			if (Resolve(__instance, out var skins, out _, out _) && skins.Units.TryGetValue(Convert.ToInt32(unitType), out var prefab) && prefab != null) __result = prefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:u", "unit skin hook: " + e.Message); }
 	}
 
-	public static void NaturePostfix(GameNatureTile natureTile, ref GameNatureVisualHub __result) {
+	public static void NaturePostfix(GamePlayerSkins __instance, GameNatureTile natureTile, ref GameNatureVisualHub __result) {
 		try {
-			var civ = Registered("nature");
-			if (civ != null && civ.Skins.NatureTiles.TryGetValue((int)natureTile, out var prefab) && prefab != null) __result = prefab;
+			if (Resolve(__instance, out var skins, out _, out _) && skins.NatureTiles.TryGetValue((int)natureTile, out var prefab) && prefab != null) __result = prefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:n", "nature skin hook: " + e.Message); }
 	}
 
-	public static void ShipPostfix(ref GameShipVisual __result) {
+	public static void ShipPostfix(GamePlayerSkins __instance, ref GameShipVisual __result) {
 		try {
-			var civ = Registered("ship");
-			if (civ != null && civ.Skins.ShipPrefab != null) __result = civ.Skins.ShipPrefab;
+			if (Resolve(__instance, out var skins, out _, out _) && skins.ShipPrefab != null) __result = skins.ShipPrefab;
 		}
 		catch (Exception e) { CoreLog.Once("civ:skin:s", "ship skin hook: " + e.Message); }
 	}

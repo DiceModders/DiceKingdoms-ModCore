@@ -43,6 +43,8 @@ internal static class MatchState {
 
 	private static void Attach(GameState gs) {
 		if (gs == null || gs.Pointer == _attachedTo) return;
+		// a new GameState means a new scene (menu / lobby): a match that ended without FullReset (left to the menu) is over now
+		if (LobbyState.MatchRunning) { CoreLog.Info("match: new game state while a match was marked running; ending it"); LobbyState.MatchEnded(); }
 		_attachedTo = gs.Pointer;
 		_game = gs;
 		Phase = MatchPhase.None;

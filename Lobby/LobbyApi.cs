@@ -44,6 +44,8 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 	private T _frozen;
 	private bool _isFrozen;
 	private T _reported;
+	private T _local;
+	private bool _hasLocal;
 
 	internal LobbyRule(LobbyMod mod, string key, string title, T defaultValue, string description, Func<bool> visible, bool affectsSimulation,
 		Func<T, string> write, Func<string, (bool ok, T value)> read) {
@@ -73,17 +75,18 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 	/// </summary>
 	public T Value => _isFrozen ? _frozen : Live;
 
-	/// <summary>The host's value as the lobby currently says (ignores the freeze). <see cref="Default"/> outside a lobby.</summary>
+	/// <summary>The host's value as the lobby currently says (ignores the freeze). Outside a Steam lobby (a local game): the value set locally, else <see cref="Default"/>.</summary>
 	public T Live {
 		get {
-			if (!LobbyState.InLobby) return Default;
+			if (!LobbyState.InLobby) return _hasLocal ? _local : Default;
 			string raw = LobbyState.GetLobbyData(StorageKey);
 			if (!string.IsNullOrEmpty(raw)) { var (ok, value) = _read(raw); if (ok) return value; }
 			return Default;
 		}
 	}
 
-	public bool Editable => LobbyState.IsHost && !LobbyState.MatchRunning;
+	/// <summary>The host can change it before the match; with no Steam lobby (a local game) the local player can.</summary>
+	public bool Editable => !LobbyState.MatchRunning && (LobbyState.IsHost || !LobbyState.InLobby);
 
 	public bool Visible {
 		get {
@@ -97,6 +100,7 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 	/// <summary>Writes a new value into the lobby (host only, before the match). Returns false when it was not accepted.</summary>
 	public bool TrySet(T value) {
 		if (!Editable) return false;
+		if (!LobbyState.InLobby) { _local = value; _hasLocal = true; Reevaluate(); return true; }   // local game: nobody to sync with
 		if (!LobbyState.SetLobbyData(StorageKey, _write(value))) return false;
 		Reevaluate();   // the host's own data callback may arrive later (or not at all): do not wait for it
 		return true;
@@ -130,7 +134,7 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 		var handler = Changed;
 		if (handler == null) return;
 		foreach (Action<T> d in handler.GetInvocationList()) {
-			try { d(now); }
+			try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(now); }
 			catch (Exception e) { CoreLog.Error($"lobby rule '{Key}' Changed handler failed: {e}"); }
 		}
 	}
@@ -166,7 +170,7 @@ public static partial class ModCore {
 		private static void Raise(Action handler, string what) {
 			if (handler == null) return;
 			foreach (Action d in handler.GetInvocationList()) {
-				try { d(); }
+				try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(); }
 				catch (Exception e) { CoreLog.Error(what + " handler failed: " + e); }
 			}
 		}
@@ -185,7 +189,7 @@ public static partial class ModCore {
 				var handler = Registered;
 				if (handler == null) return;
 				foreach (Action<ILobbyRule> d in handler.GetInvocationList()) {
-					try { d(rule); }
+					try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(rule); }
 					catch (Exception e) { CoreLog.Error("Lobby.Rules.Registered handler failed: " + e); }
 				}
 			}
@@ -194,8 +198,11 @@ public static partial class ModCore {
 			/// <param name="visible">Evaluated by whatever lists the rule; a hidden rule still applies its value.</param>
 			/// <param name="affectsSimulation">False for purely visual rules: they never trigger the "may desync" warning.</param>
 			[MethodImpl(MethodImplOptions.NoInlining)]
-			public static LobbyRule<bool> Toggle(string key, string title, bool defaultValue, string description = null, Func<bool> visible = null, bool affectsSimulation = true) {
-				var mod = LobbyMods.Identify(Assembly.GetCallingAssembly());
+			public static LobbyRule<bool> Toggle(string key, string title, bool defaultValue, string description = null, Func<bool> visible = null, bool affectsSimulation = true)
+				=> ToggleFor(LobbyMods.Identify(Assembly.GetCallingAssembly()), key, title, defaultValue, description, visible, affectsSimulation);
+
+			/// <summary>A toggle that belongs to <paramref name="mod"/> (ModCore registers rules on behalf of the mod that called it).</summary>
+			internal static LobbyRule<bool> ToggleFor(LobbyMod mod, string key, string title, bool defaultValue, string description = null, Func<bool> visible = null, bool affectsSimulation = true) {
 				return LobbyRuleRegistry.Register(key, () => new LobbyRule<bool>(mod, key, title, defaultValue, description, visible, affectsSimulation,
 					v => v ? "1" : "0",
 					raw => raw == "1" || raw.Equals("true", StringComparison.OrdinalIgnoreCase) ? (true, true)

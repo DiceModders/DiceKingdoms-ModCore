@@ -18,8 +18,34 @@ internal static class LobbyHooks {
 			var harmony = new Harmony("DiceModders.ModCore.lobby");
 			harmony.PatchAll(typeof(MatchStartPatch));
 			harmony.PatchAll(typeof(MatchEndPatch));
+			harmony.PatchAll(typeof(SteamInitPatch));
+			harmony.PatchAll(typeof(LobbyLeavePatch));
 		}
 		catch (Exception e) { CoreLog.Error("lobby hooks failed: " + e); }
+		LobbyState.SteamReady();   // Steam may already be running when ModCore sets up late
+	}
+
+	/// <summary>The game starts Steam with <c>SteamClient.Init</c>; the lobby events are subscribed right after it.</summary>
+	[HarmonyPatch(typeof(Steamworks.SteamClient), "Init")]
+	private static class SteamInitPatch {
+		[HarmonyPostfix]
+		public static void Postfix() {
+			try { LobbyState.SteamReady(); }
+			catch (Exception e) { CoreLog.Once("lobby:init", "lobby: Steam init hook: " + e); }
+		}
+	}
+
+	/// <summary>
+	/// Steam sends nothing when the local player leaves a lobby. The game leaves only through <c>Lobby.Leave</c> (main menu: Awake, StopJoiningLobby and
+	/// the join flow), which ends here.
+	/// </summary>
+	[HarmonyPatch(typeof(Steamworks.Data.Lobby), "Leave")]
+	private static class LobbyLeavePatch {
+		[HarmonyPostfix]
+		public static void Postfix() {   // the game is in one lobby at a time: leaving means the current one (no struct __instance under IL2CPP)
+			try { LobbyState.LeftByGame(0); }
+			catch (Exception e) { CoreLog.Once("lobby:leave", "lobby: leave hook: " + e); }
+		}
 	}
 
 	[HarmonyPatch(typeof(GameState), "StartGame")]

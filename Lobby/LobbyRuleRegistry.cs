@@ -41,6 +41,7 @@ internal static class LobbyRuleRegistry {
 		var byMod = new Dictionary<LobbyMod, List<string>>();
 		var order = new List<LobbyMod>();
 		foreach (var r in Rules) {
+			if (!ModSwitches.IsOn(r.Mod.Id)) continue;   // a mod switched off is announced as missing: everybody falls back to the game's own rules
 			if (!byMod.TryGetValue(r.Mod, out var keys)) { byMod[r.Mod] = keys = new List<string>(); order.Add(r.Mod); }
 			keys.Add(Clean(r.Key));
 		}

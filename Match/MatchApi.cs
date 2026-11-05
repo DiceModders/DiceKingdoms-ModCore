@@ -91,7 +91,7 @@ public static partial class ModCore {
 		private static void Raise(Action handler, string what) {
 			if (handler == null) return;
 			foreach (Action d in handler.GetInvocationList()) {
-				try { d(); }
+				try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(); }
 				catch (Exception e) { CoreLog.Error(what + " handler failed: " + e); }
 			}
 		}
@@ -99,7 +99,7 @@ public static partial class ModCore {
 		private static void Raise(Action<MatchPhase> handler, MatchPhase phase, string what) {
 			if (handler == null) return;
 			foreach (Action<MatchPhase> d in handler.GetInvocationList()) {
-				try { d(phase); }
+				try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(phase); }
 				catch (Exception e) { CoreLog.Error(what + " handler failed: " + e); }
 			}
 		}

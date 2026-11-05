@@ -7,7 +7,6 @@ internal static class Core {
 	public static void Ensure() {
 		if (_done) return;
 		_done = true;
-		CoreRunner.Spawn();
 		LobbyHooks.Install();
 		MatchState.Install();
 		CivilizationHooks.Install();

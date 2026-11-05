@@ -5,6 +5,6 @@ namespace DiceModders.ModCore;
 /// host-synced lobby rules, <c>ModCore.Civilizations</c> makes the game accept civilizations that mods add.
 /// </summary>
 public static partial class ModCore {
-	/// <summary>Installs the hooks and the helper component. Optional: every public entry point calls it. Safe to call any number of times.</summary>
+	/// <summary>Installs the hooks (ModCore has no update loop: everything follows game and Steam events). Optional: every public entry point calls it. Safe to call any number of times.</summary>
 	public static void Init() => Core.Ensure();
 }

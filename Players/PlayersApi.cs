@@ -163,5 +163,36 @@ public static partial class ModCore {
 
 		/// <summary>The player with this <see cref="MatchPlayer.Id"/>, or null.</summary>
 		public static MatchPlayer Find(ulong id) { foreach (var p in All) if (p.Id == id) return p; return null; }
+
+		/// <summary>
+		/// Puts a player (human or AI) on a civilization before the match, exactly as if their castle had been clicked to it: built-in 0..4 or a registered
+		/// one. Only the host can do it (it owns the players), only on the match-start screen, and only for a player who is not ready yet. The game sends
+		/// the change to everybody. A registered civilization must be installed for every lobby member (otherwise their game could not show it).
+		/// Returns false with <paramref name="why"/> when it is not possible.
+		/// </summary>
+		public static bool TrySetCivilization(MatchPlayer player, int civilization, out string why) {
+			Core.Ensure();
+			why = null;
+			try {
+				var p = player?.Game;
+				if (p == null) { why = "no such player"; return false; }
+				if (!p.IsServer) { why = "only the host can change civilizations"; return false; }
+				if (LobbyState.MatchRunning) { why = "the match has started"; return false; }
+				if (p.StartGameReady) { why = "the player is already ready"; return false; }
+				int look = civilization;
+				if (civilization < 0 || civilization > 4) {
+					var civ = CivilizationRegistry.Find(civilization);
+					if (civ == null) { why = "civilization " + civilization + " is not known"; return false; }
+					if (LobbyState.InLobby && !LobbyState.EveryoneHasCivilization(civ)) { why = "'" + civ.Name + "' is not installed for everybody in the lobby"; return false; }
+					look = civ.SkinsLike;
+				}
+				// the PlayerSkins constructor rejects unknown numbers: build it for the look-alike, then store the real number (as the castle click hook does)
+				var skins = new DiceKingdoms.Game.PlayerSkins((DiceKingdoms.Interface.Civilization)look, p.skinRegistry);
+				skins.civilization = (DiceKingdoms.Interface.Civilization)civilization;
+				p.skins.Value = skins;
+				return true;
+			}
+			catch (Exception e) { why = e.Message; return false; }
+		}
 	}
 }

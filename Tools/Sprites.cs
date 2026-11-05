@@ -27,6 +27,22 @@ public static class Sprites {
 	}
 
 	/// <summary>
+	/// Loads a PNG or JPG file as a texture. <paramref name="readable"/> keeps a CPU copy (needed by <see cref="TextSprites"/>; PNGs load as ARGB32).
+	/// Bilinear, no mipmaps, <c>DontUnloadUnusedAsset</c>.
+	/// </summary>
+	public static Texture2D LoadTexture(string path, bool readable) {
+		if (string.IsNullOrEmpty(path)) throw new ArgumentNullException(nameof(path));
+		var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) {
+			name = Path.GetFileNameWithoutExtension(path),
+			filterMode = FilterMode.Bilinear,
+			wrapMode = TextureWrapMode.Clamp,
+			hideFlags = HideFlags.DontUnloadUnusedAsset,
+		};
+		if (!ImageConversion.LoadImage(texture, File.ReadAllBytes(path), !readable)) throw new InvalidDataException("not a PNG/JPG image: " + path);
+		return texture;
+	}
+
+	/// <summary>
 	/// Loads one sprite per player colour from <paramref name="folder"/>: <c>00.png</c> ... <c>11.png</c>, in the game's colour order
 	/// (0 Red, 1 Pink, 2 Orange, 3 Green, 4 Carribean, 5 Cyan, 6 Yellow, 7 Ivory, 8 Brown, 9 Blue, 10 Grey, 11 Purple).
 	/// </summary>

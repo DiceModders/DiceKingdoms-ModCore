@@ -9,8 +9,9 @@ namespace DiceModders.ModCore;
 
 /// <summary>
 /// The Steam lobby, as the game's own Facepunch.Steamworks sees it. State comes from <c>SteamMatchmaking</c>'s static events (the game's own subscriptions
-/// stay untouched; ours are added next to them). Steam raises no event when the local player leaves a lobby or when the owner changes quietly, so the
-/// four-times-a-second tick of <see cref="CoreRunner"/> also compares the lobby's member count and owner with what was last seen.
+/// stay untouched; ours are added next to them), subscribed once when the game starts Steam (<c>SteamClient.Init</c>, see <see cref="LobbyHooks"/>).
+/// Steam raises no event when the local player leaves, so the game's only way out, <c>Lobby.Leave</c>, is hooked; an owner change arrives as a lobby
+/// data update (Steam sends one when the owner changes) or with the old owner's leave event. Nothing is polled.
 /// </summary>
 internal static class LobbyState {
 	private const string ModsKey = "modcore.mods";
@@ -23,7 +24,6 @@ internal static class LobbyState {
 	private static readonly Dictionary<ulong, HashSet<string>> MemberCivs = new();
 	private static readonly List<object> Keep = new();   // the IL2CPP delegates must outlive the subscription (the whole session)
 	private static bool _subscribed;
-	private static int _subscribeTries;
 
 	public static bool MatchRunning { get; private set; }
 	public static bool InLobby => _lobby.HasValue;
@@ -66,29 +66,34 @@ internal static class LobbyState {
 
 	// ------------------------------------------------------------------ subscription
 
-	/// <summary>Called four times a second: subscribes once Steam is up, then keeps the state honest.</summary>
-	public static void Tick() {
-		if (!_subscribed) TrySubscribe();
-		if (!_lobby.HasValue) return;
-		try {
-			var lobby = _lobby.Value;
-			if (lobby.MemberCount <= 0) { Leave(); return; }   // no event for "I left": an unjoined lobby has no members
-			if (lobby.Owner.Id.Value != _owner) { CoreLog.Trace("lobby owner changed"); Reload(); LobbyRuleRegistry.ReevaluateAll(); ModCore.Lobby.RaiseChanged(); }
-		}
-		catch (Exception e) { CoreLog.Once("lobby:tick", "lobby tick: " + e.Message); }
+	/// <summary>The game started Steam (or it was already running when ModCore set up): subscribe to the lobby events once.</summary>
+	public static void SteamReady() {
+		if (_subscribed) return;
+		bool up;
+		try { up = SteamClient.IsValid; }
+		catch { up = false; }
+		if (up) TrySubscribe();
+	}
+
+	/// <summary>The game called <c>Lobby.Leave</c> (its only way out of a lobby; Steam sends no event for it).</summary>
+	public static void LeftByGame(ulong lobbyId) {
+		if (_lobby.HasValue && (lobbyId == 0 || _lobby.Value.Id.Value == lobbyId)) Leave();
+	}
+
+	/// <summary>Steam announces an owner change with a lobby data update; the members and rules follow the new host.</summary>
+	private static void CheckOwner(SteamLobby lobby) {
+		ulong owner = lobby.Owner.Id.Value;
+		if (owner == _owner) return;
+		CoreLog.Trace("lobby owner changed");
+		Reload();
+		LobbyRuleRegistry.ReevaluateAll();
+		ModCore.Lobby.RaiseChanged();
 	}
 
 	private static int _nextStep;
 
 	private static void TrySubscribe() {
-		if (_subscribeTries >= 20) return;
-		bool up;
-		try { up = SteamClient.IsValid; }
-		catch { up = false; }
-		if (!up) return;   // Steam starts after the plugins: try again next tick
-		_subscribeTries++;
-
-		// each subscription is done exactly once; a failed step is retried on the next tick without repeating the ones before it
+		// each subscription is done exactly once; a failed step is retried on the next SteamReady without repeating the ones before it
 		Action[] steps = {
 			() => SteamMatchmaking.add_OnLobbyEntered(Wrap<Il2CppSystem.Action<SteamLobby>>(new Action<SteamLobby>(OnEntered))),
 			() => SteamMatchmaking.add_OnLobbyDataChanged(Wrap<Il2CppSystem.Action<SteamLobby>>(new Action<SteamLobby>(OnDataChanged))),
@@ -140,11 +145,13 @@ internal static class LobbyState {
 	}
 
 	private static void OnDataChanged(SteamLobby lobby) {
+		using var slow = CoreLog.Slow("lobby data event");
 		try {
 			// The game rewrites its own lobby data several times a second, so this must stay cheap: no member reload, no Changed event.
-			// Members and the host are tracked by the member events and the tick; rule values are re-read here and raise their own Changed.
+			// Members are tracked by the member events; the owner check is one id compare. Rule values are re-read here and raise their own Changed.
 			if (!IsCurrent(lobby)) return;
 			_dataEvents++;
+			CheckOwner(lobby);
 			LobbyRuleRegistry.ReevaluateAll();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:data", "lobby: data handler: " + e); }
@@ -154,8 +161,8 @@ internal static class LobbyState {
 		try {
 			if (!IsCurrent(lobby)) return;
 			_dataEvents++;
-			ReadMemberMods(lobby, member);   // someone published their rule keys: the "may desync" warning may change
-			CivilizationGuard.Run();
+			// someone published their rule keys: the "may desync" warning may change; the guard only matters when their civilizations changed
+			if (ReadMemberMods(lobby, member)) CivilizationGuard.Run();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:memberdata", "lobby: member data handler: " + e); }
 	}
@@ -191,7 +198,7 @@ internal static class LobbyState {
 	/// </summary>
 	public static void MatchStarted() {
 		if (MatchRunning) return;
-		TraceDataEvents("match start"); CoreLog.Trace($"match started (inLobby={InLobby}, host={IsHost}, rules={LobbyRuleRegistry.All.Count})");
+		TraceDataEvents("match start"); CoreLog.Info($"match started (inLobby={InLobby}, host={IsHost}, rules={LobbyRuleRegistry.All.Count})");
 		MatchRunning = true;
 		LobbyRuleRegistry.FreezeAll();
 		ModCore.Match.RaiseStarted();
@@ -201,9 +208,11 @@ internal static class LobbyState {
 	public static void MatchEnded() {
 		MatchState.Clear();
 		if (!MatchRunning) return;
-		TraceDataEvents("match end"); CoreLog.Trace("match ended");
+		TraceDataEvents("match end"); CoreLog.Info("match ended");
 		MatchRunning = false;
 		LobbyRuleRegistry.UnfreezeAll();
+		ModSwitches.MatchEnded();   // mods switched on/off during the match take effect now
+		UnitStatsRegistry.MatchEnded();   // unit-stat changes made during the match too
 		ModCore.Match.RaiseEnded();
 	}
 
@@ -233,9 +242,10 @@ internal static class LobbyState {
 		_members = list.ToArray();
 	}
 
-	private static void ReadMemberMods(SteamLobby lobby, SteamFriend member) {
+	/// <summary>Reads a member's published rule keys and civilizations; true when the civilizations changed.</summary>
+	private static bool ReadMemberMods(SteamLobby lobby, SteamFriend member) {
 		ulong id = member.Id.Value;
-		if (id == LocalSteamId) return;   // our own keys are known without asking Steam
+		if (id == LocalSteamId) return false;   // our own keys are known without asking Steam
 		var keys = LobbyRuleRegistry.ParseKeys(lobby.GetMemberData(member, ModsKey));
 		if (keys != null) MemberKeys[id] = keys; else MemberKeys.Remove(id);
 
@@ -243,7 +253,10 @@ internal static class LobbyState {
 		string raw = lobby.GetMemberData(member, CivsKey);
 		if (!string.IsNullOrEmpty(raw) && raw.StartsWith("v1"))
 			foreach (var k in raw.Substring(2).Split(',')) if (k.Length > 0) civs.Add(k);
+		MemberCivs.TryGetValue(id, out var before);
+		bool changed = before == null ? civs.Count > 0 : !before.SetEquals(civs);
 		if (civs.Count > 0) MemberCivs[id] = civs; else MemberCivs.Remove(id);
+		return changed;
 	}
 
 	/// <summary>Tells the other members which rules this client has (Steam member data "modcore.mods").</summary>

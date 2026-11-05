@@ -51,12 +51,27 @@ internal static class CivilizationRegistry {
 		if (replaced != null) { Items.Remove(replaced); ModCore.Civilizations.RaiseRemoved(replaced); }
 		var civ = new ModCivilization(key, id, name, techTree, skinsLike);
 		Items.Add(civ);
+		CivilizationText.Set(id, new CivilizationName(name));
 		LobbyState.PublishMods();   // the others learn that this client knows the civilization
 		ModCore.Civilizations.RaiseAdded(civ);
 		return civ;
 	}
 
-	public static void Remove(ModCivilization civ) { if (Items.Remove(civ)) { LobbyState.PublishMods(); ModCore.Civilizations.RaiseRemoved(civ); } }
+	public static void Remove(ModCivilization civ) { if (Items.Remove(civ)) { CivilizationText.Set(civ.Id, null); CivilizationText.RemoveTexts(civ.Id); LobbyState.PublishMods(); ModCore.Civilizations.RaiseRemoved(civ); } }
+
+	// models/colours a mod gave a BUILT-IN civilization (0..4); null slot = untouched
+	internal static readonly CivilizationSkins[] BuiltInSkins = new CivilizationSkins[5];
+
+	/// <summary>The models/colours for a civilization number: a registered civilization's, or a reskinned built-in one's; null when there are none.</summary>
+	public static CivilizationSkins SkinsOf(int id) {
+		if (id >= 0 && id < BuiltInSkins.Length) return BuiltInSkins[id];
+		return Find(id)?.Skins;
+	}
+
+	public static IEnumerable<CivilizationSkins> AllSkins() {
+		foreach (var s in BuiltInSkins) if (s != null) yield return s;
+		foreach (var c in Items) yield return c.Skins;
+	}
 
 	public static bool TryGetSkinsLike(int id, out int like) {
 		foreach (var c in Items) if (c.Id == id) { like = c.SkinsLike; return true; }
@@ -81,18 +96,45 @@ public static partial class ModCore {
 	/// it returns your tech tree whenever the game asks for the tree of that number and lets the player skins borrow a built-in civilization's biome.
 	/// A screen that shows them (for example the Rules drop-down, see the ModBridge) listens to <see cref="Added"/>.
 	/// </summary>
-	public static class Civilizations {
+	public static partial class Civilizations {
 		public static IReadOnlyList<ModCivilization> All { get { Core.Ensure(); return CivilizationRegistry.All; } }
 
 		public static event Action<ModCivilization> Added;
 		public static event Action<ModCivilization> Removed;
+
+		/// <summary>
+		/// Raised once, when the game's data has loaded (main menu): every building, unit, ship and ragdoll prefab, the tech trees and the text sprite sheets
+		/// exist from then on. Build your civilization's prefab copies (<see cref="Tools.Prefabs"/>) and text pictures here. Use <see cref="WhenGameDataLoaded"/>
+		/// if you may subscribe late.
+		/// </summary>
+		public static event Action GameDataLoaded;
+		public static bool IsGameDataLoaded => GameData.Loaded;
+
+		/// <summary>Runs <paramref name="action"/> now if the game's data is loaded, otherwise once when it is.</summary>
+		public static void WhenGameDataLoaded(Action action) {
+			Core.Ensure();
+			if (action == null) return;
+			if (GameData.Loaded) { try { action(); } catch (Exception e) { CoreLog.Error("GameDataLoaded handler failed: " + e); } }
+			else GameDataLoaded += action;
+		}
+
+		internal static void RaiseGameDataLoaded() {
+			var handler = GameDataLoaded;
+			if (handler != null) {
+				foreach (Action d in handler.GetInvocationList()) {
+					try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(); }
+					catch (Exception e) { CoreLog.Error("GameDataLoaded handler failed: " + e); }
+				}
+			}
+			Tools.DiskCache.Prune();   // the mods have asked for their caches by now: remove files nobody used for a few launches
+		}
 		internal static void RaiseAdded(ModCivilization civ) => Raise(Added, civ, "Civilizations.Added");
 		internal static void RaiseRemoved(ModCivilization civ) => Raise(Removed, civ, "Civilizations.Removed");
 
 		private static void Raise(Action<ModCivilization> handler, ModCivilization civ, string what) {
 			if (handler == null) return;
 			foreach (Action<ModCivilization> d in handler.GetInvocationList()) {
-				try { d(civ); }
+				try { using (CoreLog.Slow("handler " + CoreLog.NameOf(d))) d(civ); }
 				catch (Exception e) { CoreLog.Error(what + " handler failed: " + e); }
 			}
 		}
@@ -113,6 +155,41 @@ public static partial class ModCore {
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("name is required", nameof(name));
 			return CivilizationRegistry.Add(key, name, techTree, skinsLike);
 		}
+
+		/// <summary>
+		/// The name the game shows for a civilization (built-in 0..4 or registered), with optional translations by language code. Answered when the game
+		/// draws the name, so it follows a language change at once. Visual and local: other players see their own names. <c>null</c> gives the game's name back
+		/// (for a registered civilization: the name it was added with).
+		/// </summary>
+		public static void Rename(int civilization, string name, IReadOnlyDictionary<string, string> byLanguage = null) {
+			Core.Ensure();
+			if (name != null) { CivilizationText.Set(civilization, new CivilizationName(name, byLanguage)); return; }
+			var civ = CivilizationRegistry.Find(civilization);
+			CivilizationText.Set(civilization, civ != null ? new CivilizationName(civ.Name) : null);
+		}
+
+		/// <summary>
+		/// Replaces one of the game's texts (its localization key, e.g. <c>unit.SOLDIER.name</c>, <c>unit.SOLDIER.lore</c>, <c>building.WINDMILL.name</c>,
+		/// <c>technology.TEMPLARS.description</c>) while the local player's civilization is <paramref name="civilization"/>: in the lobby, the Rules screen and the
+		/// match. Works for built-in (0..4) and registered civilizations. Answered when the game draws the text, nothing is polled. Visual and local: every player
+		/// reads the texts of their own civilization, nothing is sent to others. <c>null</c> gives the game's text back.
+		/// </summary>
+		public static void SetText(int civilization, string key, string text, IReadOnlyDictionary<string, string> byLanguage = null) {
+			Core.Ensure();
+			CivilizationText.SetText(civilization, key, text != null ? new CivilizationName(text, byLanguage) : null);
+		}
+
+		/// <summary>A unit's name for a civilization (<c>unit.TYPE.name</c>); <paramref name="unit"/> is the game's unit type, e.g. <c>Unit.Type.SOLDIER</c>.</summary>
+		public static void RenameUnit(int civilization, DiceKingdoms.Game.Unit.Type unit, string name, IReadOnlyDictionary<string, string> byLanguage = null)
+			=> SetText(civilization, "unit." + unit + ".name", name, byLanguage);
+
+		/// <summary>A unit's one-line description in the Rules screen (<c>unit.TYPE.lore</c>).</summary>
+		public static void SetUnitLore(int civilization, DiceKingdoms.Game.Unit.Type unit, string lore, IReadOnlyDictionary<string, string> byLanguage = null)
+			=> SetText(civilization, "unit." + unit + ".lore", lore, byLanguage);
+
+		/// <summary>A building's name for a civilization (<c>building.TYPE.name</c>), e.g. <c>"WINDMILL"</c>.</summary>
+		public static void RenameBuilding(int civilization, string buildingType, string name, IReadOnlyDictionary<string, string> byLanguage = null)
+			=> SetText(civilization, "building." + buildingType + ".name", name, byLanguage);
 
 		/// <summary>
 		/// A copy of a built-in civilization's tech tree (0 Europe .. 4 Maya) to start a tree of your own from: change its <c>Slots</c> (which technologies appear, where, and

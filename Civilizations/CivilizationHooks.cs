@@ -30,6 +30,9 @@ internal static class CivilizationHooks {
 			harmony.PatchAll(typeof(StatisticsTechTreeHook));
 			harmony.PatchAll(typeof(StatisticsLearnableHook));
 			PlayerSkinsLookHooks.Install(harmony);
+			CivilizationText.Install(harmony);
+			IslandColours.Install(harmony);
+			GameData.Install(harmony);   // last: may raise GameDataLoaded at once (late setup)
 		}
 		catch (Exception e) { CoreLog.Error("civilization hooks failed: " + e); }
 	}
@@ -46,7 +49,10 @@ internal static class TechTreeLookupHook {
 	public static bool Prefix(GameTechnologies __instance, GameCivilization civilization, ref GameTechTree __result) {
 		try {
 			int id = (int)civilization;
-			if (id >= 0 && id <= 4) return true;
+			if (id >= 0 && id <= 4) {
+				if (BuiltInChanges.TryGetTree(id, out var replaced)) { __result = replaced; return false; }   // a mod's tree, only when safe (see BuiltInChanges)
+				return true;
+			}
 			if (CivilizationRegistry.TryGetTree(id, out var tree)) { __result = tree; return false; }
 			if (CivilizationRegistry.TryGetSkinsLike(id, out int like)) { __result = __instance.TechTree((GameCivilization)like); return false; }
 		}
@@ -252,10 +258,12 @@ internal static class PlayerSkinsLookHooks {
 
 /// <summary>
 /// Runs on the host while a lobby is open: a player standing on a registered civilization that some member does not have is moved to the built-in civilization
-/// it looks like, because that member's game would throw on the number (and freeze). Called on member changes and once a second.
+/// it looks like, because that member's game would throw on the number (and freeze). Runs when a member joins, leaves or publishes its civilizations
+/// (the only moments the answer can change; the castle click itself only offers civilizations everybody has).
 /// </summary>
 internal static class CivilizationGuard {
 	public static void Run() {
+		using var slow = CoreLog.Slow("civilization guard");
 		try {
 			if (CivilizationRegistry.All.Count == 0 || !LobbyState.InLobby || !LobbyState.IsHost || LobbyState.MatchRunning) return;
 			foreach (var player in UnityEngine.Object.FindObjectsOfType<GamePlayer>()) {
@@ -303,8 +311,8 @@ internal static class StatisticsTechTreeHook {
 			var skins = __instance.island?.Skins;
 			if (skins == null) return true;
 			int id = (int)skins.civilization;
-			if (id >= 0 && id <= 4) return true;
-			if (CivilizationRegistry.Find(id) == null) return true;
+			if (id >= 0 && id <= 4) { if (!BuiltInChanges.TryGetTree(id, out _)) return true; }   // a built-in civilization with a mod's tree goes the same way
+			else if (CivilizationRegistry.Find(id) == null) return true;
 			var technologies = __instance.technologies;
 			if (technologies == null) return true;
 			__result = technologies.TechTree((GameCivilization)id);   // TechTreeLookupHook answers for the registered number
@@ -328,8 +336,8 @@ internal static class StatisticsLearnableHook {
 			var skins = __instance.island?.Skins;
 			if (skins == null || technology == null) return true;
 			int id = (int)skins.civilization;
-			if (id >= 0 && id <= 4) return true;
-			if (CivilizationRegistry.Find(id) == null) return true;
+			if (id >= 0 && id <= 4) { if (!BuiltInChanges.TryGetTree(id, out _)) return true; }   // a built-in civilization with a mod's tree goes the same way
+			else if (CivilizationRegistry.Find(id) == null) return true;
 
 			var learnt = __instance.LearntTechnologies;
 			if (learnt == null) return true;

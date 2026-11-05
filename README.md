@@ -98,8 +98,8 @@ Core.Lobby.Changed += () => Refresh();   // joined/left, member joined/left/kick
 
 When the lobby turns into a match and back, see [Match](#match).
 
-Limits worth knowing: a lobby entered **before** ModCore loaded is not seen (ModCore loads at game start, so this only matters for hot-reloading). Steam sends no event when the local
-player leaves a lobby, so ModCore polls four times a second; `Changed` therefore arrives up to 250 ms late in that one case.
+Limits worth knowing: a lobby entered **before** ModCore loaded is not seen (ModCore loads at game start, so this only matters for hot-reloading). ModCore has no update loop:
+Steam's lobby events are subscribed right after the game starts Steam, leaving is seen through the game's own `Lobby.Leave`, and a host change arrives with Steam's lobby data update.
 
 ### Lobby rules
 
@@ -231,8 +231,99 @@ civ.Skins.BuildingModel(BuildingTypeName.CASTLE, castle, flag, yaw, icons);
 
 On the first lookup ModCore copies the `skinsLike` civilization's building prefab once, puts the mesh into the normal and damaged look (one LOD group, the others blanked so nothing overlaps), moves the big flag, gives the copy the 12 pictures and returns it for your civilization. The game then uses it everywhere: in the match, pooled copies, the burnt state, and (through the pictures) the lobby card, player summary, scoreboard, end screen, build menu, Rules screen and texts. The game's materials stay, so player colours, tints and the burnt look keep working: give the mesh UVs on the game's 8x8 colour palette, in the prefab's own space. Footprint, rules and effects stay those of the original building. Pictures must be exactly one per player colour in the game's order (0 Red, 1 Pink, 2 Orange, 3 Green, 4 Carribean, 5 Cyan, 6 Yellow, 7 Ivory, 8 Brown, 9 Blue, 10 Grey, 11 Purple), 237x235 px like the game's own; otherwise they are ignored with a warning. A `Skins.Building(type, prefab)` for the same type wins over a model.
 
-`[Debug] DumpGameData = true` in the ModCore config makes ModCore write `BepInEx/ModCore-game-data.txt` (technologies, tech trees, building types, the skin registry, prefabs) and
-`BepInEx/ModCore-sprites.txt` (every sprite) once the game has loaded: the reference for finding the game's own prefabs and sprites to copy.
+### A whole civilization from the game's own prefabs
+
+```csharp
+var civ = Core.Civilizations.Add("author.civ", "My Civ", () => myTree, skinsLike: 2);
+civ.Skins.GroundColour(4, 3, grass).GroundColour(4, 4, grass2).NatureColour(2, 2, grass);   // island ground / mountains / trees
+Core.Civilizations.WhenGameDataLoaded(() => {
+    var look = new PlayerSkins((Civilization)2, Resources.FindObjectsOfTypeAll<SkinRegistry>()[0]);
+    foreach (var type in Resources.FindObjectsOfTypeAll<BuildingTypes>()[0].Types) {
+        var copy = Tools.Prefabs.Copy(look.GetBuildingVisualPrefab(type));   // change meshes, icons, ragdoll references on the copy
+        civ.Skins.Building(type.name, copy);
+    }
+    Tools.TextSprites.AddLike("My Civ Text", entries);   // pictures inside game texts, named like your icon sprites
+});
+```
+
+- `Civilizations.GameDataLoaded` / `WhenGameDataLoaded(action)`: once, when the game's data has loaded (`SkinRegistry.Awake`, main menu). Every prefab,
+  tech tree and text sprite sheet exists from then on; build the civilization's copies here.
+- `Tools.Prefabs.Copy(prefab)`: an inactive, persistent copy (same name) that you can change and hand to `civ.Skins`; the original stays untouched.
+  The game instantiates the copy like its own prefab (pools, ragdolls, lobby card). Point `ReplaceWithRagdoll.ragdollPrefab` in units and inhabitants
+  to your ragdoll copies.
+- `civ.Skins.GroundColour(x, y, colour)` / `NatureColour(...)`: recolour 8x8 palette cells (x from the left, y from the bottom) on that civilization's
+  islands only (ground; mountains, trees and flowers). Applied when the islands spawn and when the game adds a mountain or nature visual.
+- `Tools.TextSprites.AddLike(assetName, entries)`: pictures inside game texts. The game writes `<sprite name="...">` with the name of the icon sprite it
+  shows; each entry (your sprite name, the game sprite to copy size from, a readable texture from `Tools.Sprites.LoadTexture(path, true)`) is fitted
+  into a new sprite asset that is added to the fallbacks of the default one ("Icons Text"). Give your icon sprites unique names
+  (e.g. `building-icon-castle-mycivname-red`).
+
+The name the game shows comes from the name given to `Add`; `ModCore.Civilizations.Rename(id, name, byLanguage)` sets it per language (`{"de": "...", "zh-CN": "..."}`), and also
+renames a built-in civilization (0..4). ModCore answers when the game draws the name, so it follows a language change at once; it is local (other players see their own names).
+
+### Unit, building and technology names per civilization
+
+```csharp
+Core.Civilizations.RenameUnit(civ.Id, Unit.Type.SOLDIER, "Footman", new Dictionary<string, string> { ["de"] = "Fußsoldat" });
+Core.Civilizations.RenameBuilding(civ.Id, "WINDMILL", "Mill");
+Core.Civilizations.SetText(civ.Id, "technology.TEMPLARS.description", "Replaces footmen with knights.");   // any game text key
+```
+
+A text is replaced while the civilization being looked at is that one: the one picked in an open Rules window, otherwise the local player's (lobby, match).
+Works for built-in and mod civilizations. Visual and local. The keys are the game's localization keys (`unit.SOLDIER.name`, `unit.SOLDIER.lore`,
+`building.WINDMILL.name`, `technology.TEMPLARS.name` / `.description`, ...).
+
+### Reskinning a built-in civilization
+
+```csharp
+var viking = Core.Civilizations.Reskin(2);                       // same CivilizationSkins as a mod civilization
+viking.Unit(6, mySoldierPrefab).GroundColour(4, 3, grass);         // anything left out stays the game's original
+Core.Civilizations.ReplaceTree(2, () => myTree, "author.viking-tree", "My Viking tech tree");
+```
+
+- `Reskin(0..4)`: looks only (models, icons, island colours). Visual and local: players with and without the mod can play together.
+- `ReplaceTree(0..4, tree, ruleKey, title)`: gameplay, so it is guarded. ModCore registers a lobby rule (on by default) and uses your tree only with
+  no Steam lobby, or when the host's rule is on and every member has the mod; otherwise everybody plays the original tree. Frozen at match start.
+
+### Fast loading: cached textures
+
+```csharp
+var atlas = Tools.IconAtlas.Build("My Civ icons", pngPaths, 256, 256);   // first launch: decode + pack + DXT5; later: one file read
+Sprite s = atlas.Sprite(index, pivot, "building-icon-castle-mycivname-red");
+Tools.TextSprites.AddLike("My Civ Text", entries, atlas.Key);             // the text sheet is cached too; pictures load only when it is rebuilt
+```
+
+`Tools.TextureCache` keeps built textures GPU-compressed in `BepInEx\cache\ModCore`, keyed by the source files' paths, sizes and change times: change a
+PNG and it is rebuilt on the next launch. Deleting the folder is always safe. Use `TextSprites.Entry(name, likeName, () => load())` so pictures are
+only decoded when the sheet has to be redrawn.
+
+## Mod on/off switch
+
+```csharp
+var sw = Core.Mods.Switch(Config, affectsSimulation: true);   // [General] Enabled in your .cfg; in-game config editors show it as a toggle
+sw.WhenOn(() => Enable(), () => Disable());                    // runs now and on every change
+```
+
+- Editable in game with an in-game config editor (DiceModders ConfigMenu); the mod reacts to the change at once (no polling).
+- `affectsSimulation: true`: a change made during a match waits until the match ends. `restartNeeded: true`: read at start only.
+- While a mod is off, its lobby rules are not announced (the other players see it as missing), and its unit stats / tech trees are not used,
+  so everybody plays the game's own values.
+
+## Unit stats
+
+```csharp
+var stats = Core.Units.Register("author.balance", "My balance changes", priority: 10);   // also the host's lobby switch
+stats.Set(Unit.Type.ARCHER, new UnitStatChange { AttackPeriod = 7 });                     // every civilization
+stats.Set(civ.Id, Unit.Type.ARCHER, new UnitStatChange { Range = 8 });                    // one civilization
+Core.Units.SetCivilizationDefaults(civ, Unit.Type.SOLDIER, new UnitStatChange { Parry = new Chance(3, 4) });   // a mod civilization's own values
+```
+
+- Values: attack period / delay (ticks), aggro distance, range (both in the game's units: the Rules screen shows half), parry, arrow block, miss chance.
+- Order, lowest first: the game's values, a mod civilization's own defaults, all-civilization changes, per-civilization changes; a higher priority
+  wins, equal priorities go by key. Fields left null keep the value below. A civilization without own defaults uses the game's values.
+- Synced safely: a mod's changes apply only with no Steam lobby, or when the host's switch is on and every member has the mod (and it is on);
+  otherwise everybody plays the game's values. Frozen at match start.
+- `Units.Mods`, `Units.Default(type)`, `Units.Effective(civ, type)`, `Units.CivilizationDefaults(civ, type)`: everything a lobby screen needs to list.
 
 ## Tools
 
@@ -278,20 +369,20 @@ The interop folder exists after the first game start with BepInEx 6 installed (i
 | Path | What is in it |
 |---|---|
 | `Plugin.cs` | The BepInEx entry point; calls `Core.Ensure()`. |
-| `ModCore.cs`, `Core.cs` | Public `ModCore.Init()`; one-time installation of hooks and the helper component. |
-| `CoreRunner.cs` | A `MonoBehaviour` that ticks the lobby state four times a second. |
+| `ModCore.cs`, `Core.cs` | Public `ModCore.Init()`; one-time installation of the hooks (no update loop). |
 | `Lobby/LobbyApi.cs` | The public lobby, rules and compatibility API (`ModCore.Lobby`). |
 | `Lobby/LobbyState.cs` | Steam subscription, members, owner, match start/end, freezing. |
-| `Lobby/LobbyHooks.cs` | Harmony patches on `GameState.StartGame` / `FullReset` (match start and end). |
+| `Lobby/LobbyHooks.cs` | Harmony patches on `GameState.StartGame` / `FullReset` (match start and end), `SteamClient.Init` (subscribe) and `Lobby.Leave` (left). |
 | `Lobby/LobbyRuleRegistry.cs`, `LobbyMods.cs` | Rule registry, the `modcore.mods` format, which plugin registered a rule. |
-| `Civilizations/CivilizationsApi.cs` | Public API (`Add`, `CloneTree`, registry). |
+| `Civilizations/CivilizationsApi.cs` | Public API (`Add`, `Rename`, `CloneTree`, registry). |
 | `Civilizations/CivilizationHooks.cs` | The patches that make unknown civilization numbers safe (tree, skins, network readers, castle click, AI, `Statistics`, guard). |
 | `Civilizations/CivilizationSkins.cs` | `civ.Skins` (own models) and the skin lookup patches. |
-| `Civilizations/CivilizationText.cs` | Adds the civilization names to the game's text table. |
-| `Civilizations/GameDataDump.cs` | The `DumpGameData` developer tool. |
+| `Civilizations/CivilizationText.cs` | Answers the civilization name when the game draws it (`ITextElement.Localized.Render`), per language. |
+| `Civilizations/GameData.cs` | `GameDataLoaded` (postfix on `SkinRegistry.Awake`). |
+| `Civilizations/IslandColours.cs` | Per-civilization island ground / nature colours (MaterialPropertyBlock palette copies, island events). |
 | `Match/MatchApi.cs`, `MatchState.cs`, `MatchSettings.cs` | The public match API (`ModCore.Match`, `MatchPhase`, `MatchSettings`) and the listeners on the game's `GameState` events. |
 | `Players/PlayersApi.cs` | `ModCore.Players` and `MatchPlayer`. |
-| `Tools/` | Public helpers `Patcher`, `GameTypes`, `Reflect`, `Mem`, `Meshes`, `Sprites`, and the console `ConsoleGuard`. |
+| `Tools/` | Public helpers `Patcher`, `GameTypes`, `Reflect`, `Mem`, `Meshes`, `Sprites`, `Prefabs`, `TextSprites`, and the console `ConsoleGuard`. |
 | `docs/NOTES.md` | How it works inside and why (read before changing the hooks). |
 | `docs/EXAMPLE_MOD.md` | A complete minimal mod. |
 
