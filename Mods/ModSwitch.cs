@@ -51,6 +51,7 @@ public sealed class ModSwitch {
 		CoreLog.Info("mod '" + ModId + "' turned " + (want ? "on" : "off") + " (" + why + ")");
 		LobbyState.PublishMods();   // the lobby learns whether this mod's rules exist
 		UnitStatsRegistry.Changed();
+		GameBalance.Recompute("mod switch");
 		var handler = Changed;
 		if (handler == null) return;
 		foreach (Action<bool> d in handler.GetInvocationList()) {

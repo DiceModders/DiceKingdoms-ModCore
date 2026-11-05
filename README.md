@@ -213,13 +213,27 @@ The game uses the civilization number in several places and throws (or freezes) 
 | `PlayerSkins.Clone()` (the Rules screen clones the lobby's skins) | Cloned through `skinsLike`, the real number stored afterwards |
 | The network readers of `PlayerSkinsSerialization` (the number travels as one byte) | Build the skins from the number; an unknown number becomes the first civilization instead of throwing |
 | `PlayerSkins.Get*Prefab` (skin registry lookups by civilization) | Your `civ.Skins` model if you set one, otherwise the look of `skinsLike` |
-| `AIPlay.SampleBuildOrder` | Uses the build orders of `skinsLike` |
+| `AIPlay.InitBuildOrders` / `SampleBuildOrder` | Every block is checked before the game parses it (one bad name would stop every AI); your civilization gets your orders, or the `skinsLike` ones rearranged to its tree |
 | The castle click (`Player.NextCivilization`) | Your civilization is added after the unlocked ones, only when every lobby member has it (published as `modcore.civs`); the host moves a player off one somebody lacks |
 | The text key `civilization.<id>.name` | `name` is added to the text table of the current language |
 
 Your mod provides what is its own: `civ.Skins` (building, unit, nature and ship prefabs; leave out what you do not replace), the tech tree (`ModCore.Civilizations.CloneTree(from)` copies a built-in one to
-edit), and the name. See the wiki page *Making a civilization* for the step by step guide, every asset a civilization can have and what cannot be changed (biome, AI build orders, 5..127).
+edit), the name and optionally AI build orders. See the wiki page *Making a civilization* for the step by step guide, every asset a civilization can have and what cannot be changed (biome, 5..127).
 `Civilizations.All`, `Added`, `Removed` and `civ.Remove()` exist for tools. To make the civilization selectable on the Rules screen, players install ModBridge.
+
+### AI build orders
+
+```csharp
+Core.Civilizations.AddBuildOrders(civ.Id, @"
+civilization=ANY weight=2 strategy=MILITARY name=rush [
+    technologies [ UNLOCK_STORAGE UNLOCK_ARCHERY_RANGE UNLOCK_GUARD_TOWER ]
+    buildings [ house cot house farm racks racks archery storage guard ]
+]");
+```
+
+The game's own format; `civilization=` is replaced with yours. Broken blocks are left out with a log line, technologies are arranged to fit the civilization's tree, and a
+strategy without an order uses the `skinsLike` orders rearranged the same way. The game's own orders (and `custom-build-orders.txt`) are checked too, so a broken file
+from another mod no longer stops the AI.
 
 ### Own building models
 
@@ -324,6 +338,30 @@ Core.Units.SetCivilizationDefaults(civ, Unit.Type.SOLDIER, new UnitStatChange { 
 - Synced safely: a mod's changes apply only with no Steam lobby, or when the host's switch is on and every member has the mod (and it is on);
   otherwise everybody plays the game's values. Frozen at match start.
 - `Units.Mods`, `Units.Default(type)`, `Units.Effective(civ, type)`, `Units.CivilizationDefaults(civ, type)`: everything a lobby screen needs to list.
+
+## Building and technology values
+
+```csharp
+var balance = Core.Balance.Register("author.economy", "Cheaper farms");
+balance.Set(BuildingTypeName.FARM, new BuildingChange { Cost = new ResourceChange { Wood = 2 }, Health = 4 });
+balance.SetCost(TechnologyName.UNLOCK_MARKET, new ResourceChange { Gold = 3 });
+```
+
+Building cost, storage, pillage / remains rewards, health, tower range and period; technology cost. Shared by every civilization. Same safety rules as unit stats;
+the game's values are restored whenever the set of active mods changes. `Balance.Building(type)` / `DefaultBuilding(type)` / `TechnologyCost(tech)` for screens.
+
+## Rule groups
+
+```csharp
+rule.InGroup(Core.Lobby.Groups.ForCivilization(civ.Id));          // a heading per civilization
+rule.InGroup(Core.Lobby.Groups.Get("author.events", "Events"));    // or your own
+```
+
+`Core.Lobby.Groups.All` (sorted) and `Changed` let a lobby screen show collapsible headings instead of one long list.
+
+## Documentation
+
+Every feature with examples: the *Modding Libraries* section of the [DiceModders wiki](https://dicemodders.github.io/DiceKingdoms-Modding-Wiki/).
 
 ## Tools
 

@@ -50,9 +50,12 @@ internal static class LobbyRuleRegistry {
 		return sb.ToString();
 	}
 
-	private static string Clean(string s) => (s ?? "").Replace(';', '_').Replace('|', '_').Replace(',', '_');
+	private static string Clean(string s) => (s ?? "").Replace(';', '_').Replace('|', '_').Replace(',', '_').Replace('@', '_');
 
-	/// <summary>Rule keys another member published (null when it published nothing, i.e. it has no ModCore).</summary>
+	/// <summary>"key@version": what a member must have published for this rule (the same mod version: another version may play differently).</summary>
+	public static string TagOf(ILobbyRule rule) => Clean(rule.Key) + "@" + Clean(rule.ModVersion);
+
+	/// <summary>Rule tags ("key@version") another member published (null when it published nothing, i.e. it has no ModCore).</summary>
 	public static HashSet<string> ParseKeys(string raw) {
 		if (string.IsNullOrEmpty(raw) || !raw.StartsWith("v1")) return null;
 		var keys = new HashSet<string>();
@@ -60,7 +63,7 @@ internal static class LobbyRuleRegistry {
 		for (int i = 1; i < parts.Length; i++) {
 			var fields = parts[i].Split('|');
 			if (fields.Length < 4 || fields[3].Length == 0) continue;
-			foreach (var k in fields[3].Split(',')) keys.Add(k);
+			foreach (var k in fields[3].Split(',')) keys.Add(k + "@" + fields[2]);
 		}
 		return keys;
 	}
@@ -72,9 +75,12 @@ internal static class LobbyRuleRegistry {
 		foreach (var rule in Rules) {
 			if (!rule.AffectsSimulation || !rule.IsNonDefault) continue;
 			foreach (var member in LobbyState.Members) {
-				if (LobbyState.MemberHasKey(member.SteamId, Clean(rule.Key))) continue;
-				if (seen.Add(member.SteamId + "|" + rule.Mod.Id))
-					lines.Add($"{member.Name} does not have {rule.Mod.Name}, this rule may desync.");
+				if (member.IsLocal || LobbyState.MemberHasKey(member.SteamId, TagOf(rule))) continue;
+				if (!seen.Add(member.SteamId + "|" + rule.Mod.Id)) continue;
+				string other = LobbyState.MemberVersionOf(member.SteamId, Clean(rule.Key));
+				lines.Add(other != null
+					? $"{member.Name} has {rule.Mod.Name} {other}, the host has {rule.ModVersion}: this rule may desync."
+					: $"{member.Name} does not have {rule.Mod.Name}, this rule may desync.");
 			}
 		}
 		return lines;

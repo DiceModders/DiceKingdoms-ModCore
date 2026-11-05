@@ -48,12 +48,19 @@ internal static class LobbyState {
 		catch (Exception e) { CoreLog.Once("lobby:setdata", "lobby: writing lobby data failed: " + e.Message); return false; }
 	}
 
-	public static bool MemberHasKey(ulong steamId, string key) => MemberKeys.TryGetValue(steamId, out var keys) && keys.Contains(key);
+	public static bool MemberHasKey(ulong steamId, string tag) => MemberKeys.TryGetValue(steamId, out var keys) && keys.Contains(tag);
+
+	/// <summary>The version of the mod a member published this rule key with, or null when they do not have it.</summary>
+	public static string MemberVersionOf(ulong steamId, string key) {
+		if (!MemberKeys.TryGetValue(steamId, out var keys)) return null;
+		foreach (var k in keys) if (k.StartsWith(key + "@", StringComparison.Ordinal)) return k.Substring(key.Length + 1);
+		return null;
+	}
 
 	/// <summary>True when every other member published the same civilization with the same number (a client without it would not know what the number means).</summary>
 	public static bool EveryoneHasCivilization(ModCivilization civ) {
 		if (!_lobby.HasValue) return true;
-		string clean = CleanCivKey(civ.Key) + "=" + civ.Id;
+		string clean = CivTag(civ);
 		ulong me = LocalSteamId;
 		foreach (var m in _members) {
 			if (m.SteamId == me) continue;
@@ -62,7 +69,9 @@ internal static class LobbyState {
 		return true;
 	}
 
-	private static string CleanCivKey(string key) => (key ?? "").Replace(',', '_').Replace(';', '_');
+	private static string CleanCivKey(string key) => (key ?? "").Replace(',', '_').Replace(';', '_').Replace('@', '_');
+	/// <summary>"key=id@version": the same civilization, the same number and the same mod version (another version may play differently).</summary>
+	private static string CivTag(ModCivilization c) => CleanCivKey(c.Key) + "=" + c.Id + "@" + CleanCivKey(c.ModVersion);
 
 	// ------------------------------------------------------------------ subscription
 
@@ -163,6 +172,7 @@ internal static class LobbyState {
 			_dataEvents++;
 			// someone published their rule keys: the "may desync" warning may change; the guard only matters when their civilizations changed
 			if (ReadMemberMods(lobby, member)) CivilizationGuard.Run();
+			GameBalance.Recompute("member mods");   // who has which mod decides which balance mods apply (cheap when nothing changed)
 		}
 		catch (Exception e) { CoreLog.Once("lobby:memberdata", "lobby: member data handler: " + e); }
 	}
@@ -175,6 +185,7 @@ internal static class LobbyState {
 			Reload();
 			CivilizationGuard.Run();   // a member without a civilization the host picked must not be sent its number
 			LobbyRuleRegistry.ReevaluateAll();
+			GameBalance.Recompute("members");
 			ModCore.Lobby.RaiseChanged();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:member", "lobby: member handler: " + e); }
@@ -201,6 +212,8 @@ internal static class LobbyState {
 		TraceDataEvents("match start"); CoreLog.Info($"match started (inLobby={InLobby}, host={IsHost}, rules={LobbyRuleRegistry.All.Count})");
 		MatchRunning = true;
 		LobbyRuleRegistry.FreezeAll();
+		GameBalance.Recompute("match started");   // building/technology values are fixed for the whole match from here
+		BuildOrders.ResetLoaded();   // the AI reads its build orders again, with the trees active for this match
 		ModCore.Match.RaiseStarted();
 	}
 
@@ -213,6 +226,7 @@ internal static class LobbyState {
 		LobbyRuleRegistry.UnfreezeAll();
 		ModSwitches.MatchEnded();   // mods switched on/off during the match take effect now
 		UnitStatsRegistry.MatchEnded();   // unit-stat changes made during the match too
+		GameBalance.MatchEnded();
 		ModCore.Match.RaiseEnded();
 	}
 
@@ -251,7 +265,7 @@ internal static class LobbyState {
 
 		var civs = new HashSet<string>();
 		string raw = lobby.GetMemberData(member, CivsKey);
-		if (!string.IsNullOrEmpty(raw) && raw.StartsWith("v1"))
+		if (!string.IsNullOrEmpty(raw) && raw.StartsWith("v2"))   // older ModCore (v1, no versions) counts as not having the civilization
 			foreach (var k in raw.Substring(2).Split(',')) if (k.Length > 0) civs.Add(k);
 		MemberCivs.TryGetValue(id, out var before);
 		bool changed = before == null ? civs.Count > 0 : !before.SetEquals(civs);
@@ -266,8 +280,8 @@ internal static class LobbyState {
 			_lobby.Value.SetMemberData(ModsKey, LobbyRuleRegistry.DescribeMods());
 			MemberKeys[LocalSteamId] = LobbyRuleRegistry.ParseKeys(LobbyRuleRegistry.DescribeMods()) ?? new HashSet<string>();
 			var civKeys = new List<string>();
-			foreach (var c in CivilizationRegistry.All) civKeys.Add(CleanCivKey(c.Key) + "=" + c.Id);
-			_lobby.Value.SetMemberData(CivsKey, "v1" + string.Join(",", civKeys));
+			foreach (var c in CivilizationRegistry.All) civKeys.Add(CivTag(c));
+			_lobby.Value.SetMemberData(CivsKey, "v2" + string.Join(",", civKeys));
 		}
 		catch (Exception e) { CoreLog.Once("lobby:publish", "lobby: could not publish the rule keys: " + e.Message); }
 	}

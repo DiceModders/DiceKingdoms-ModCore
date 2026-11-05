@@ -24,6 +24,8 @@ public interface ILobbyRule {
 	bool Editable { get; }
 	/// <summary>The host's current value differs from the default.</summary>
 	bool IsNonDefault { get; }
+	/// <summary>The heading the rule is listed under (null: the general part of the lobby screen).</summary>
+	LobbyGroup Group { get; }
 }
 
 internal interface ILobbyRuleInternal : ILobbyRule {
@@ -97,6 +99,16 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 
 	public bool IsNonDefault => !EqualityComparer<T>.Default.Equals(Live, Default);
 
+	public LobbyGroup Group { get; private set; }
+
+	/// <summary>Lists the rule under a heading (e.g. <c>ModCore.Lobby.Groups.ForCivilization(civ.Id)</c>); null puts it back in the general part. Returns the rule.</summary>
+	public LobbyRule<T> InGroup(LobbyGroup group) {
+		if (Group == group) return this;
+		Group = group;
+		ModCore.Lobby.Groups.RaiseChanged();
+		return this;
+	}
+
 	/// <summary>Writes a new value into the lobby (host only, before the match). Returns false when it was not accepted.</summary>
 	public bool TrySet(T value) {
 		if (!Editable) return false;
@@ -145,7 +157,7 @@ public static partial class ModCore {
 	/// The Steam lobby the game is in: who is in it, who hosts it, and rules the host can set for everybody. The match itself is <see cref="Match"/>.
 	/// Everything here is read on the main thread. The state comes from the game's own Steam matchmaking (Facepunch.Steamworks) events.
 	/// </summary>
-	public static class Lobby {
+	public static partial class Lobby {
 		/// <summary>True between entering a Steam lobby and leaving it (the lobby also stays while a match runs).</summary>
 		public static bool InLobby { get { Core.Ensure(); return LobbyState.InLobby; } }
 

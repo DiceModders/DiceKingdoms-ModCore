@@ -175,7 +175,7 @@ internal static class UnitStatsRegistry {
 		return Live(m);
 	}
 
-	private static bool Live(UnitStatsMod m) => m.Rule.Value && BuiltInChanges.EveryoneHas(m.Rule.Key);
+	private static bool Live(UnitStatsMod m) => m.Rule.Value && BuiltInChanges.EveryoneHas(m.Rule);
 
 	/// <summary>
 	/// The game's values, then the civilization's own defaults (mod civilizations), then every active mod in a fixed order all clients agree on:

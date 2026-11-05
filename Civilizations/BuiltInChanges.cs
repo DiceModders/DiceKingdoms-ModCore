@@ -43,12 +43,13 @@ internal static class BuiltInChanges {
 		return Live(r);
 	}
 
-	private static bool Live(TreeReplacement r) => r.Rule.Value && EveryoneHas(r.Rule.Key);
+	private static bool Live(TreeReplacement r) => r.Rule.Value && EveryoneHas(r.Rule);
 
-	/// <summary>Every lobby member published this rule key (has the mod); the local player always has it.</summary>
-	internal static bool EveryoneHas(string ruleKey) {
+	/// <summary>Every lobby member published this rule with the same mod version (has the same mod); the local player always has it.</summary>
+	internal static bool EveryoneHas(ILobbyRule rule) {
+		string tag = LobbyRuleRegistry.TagOf(rule);
 		foreach (var m in LobbyState.Members)
-			if (!m.IsLocal && !LobbyState.MemberHasKey(m.SteamId, ruleKey)) return false;
+			if (!m.IsLocal && !LobbyState.MemberHasKey(m.SteamId, tag)) return false;
 		return true;
 	}
 }
@@ -80,7 +81,8 @@ public static partial class ModCore {
 			if (builtInCivilization < 0 || builtInCivilization > 4) throw new ArgumentOutOfRangeException(nameof(builtInCivilization), "0..4 (a mod civilization gives its tree to Add)");
 			if (tree == null) throw new ArgumentNullException(nameof(tree));
 			var rule = Lobby.Rules.ToggleFor(owner, ruleKey, title, true,
-				description ?? "Uses this mod's tech tree for " + (DiceKingdoms.Interface.Civilization)builtInCivilization + ". Only when every player has the mod; otherwise the original tree.");
+				description ?? "Uses this mod's tech tree for " + (DiceKingdoms.Interface.Civilization)builtInCivilization + ". Only when every player has the mod; otherwise the original tree.")
+				.InGroup(LobbyGroupRegistry.ForCivilization(builtInCivilization));
 			BuiltInChanges.Trees[builtInCivilization] = new BuiltInChanges.TreeReplacement { Provider = tree, Rule = rule };
 			return rule;
 		}

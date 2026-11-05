@@ -27,6 +27,7 @@ internal static class CivilizationHooks {
 			harmony.PatchAll(typeof(PlayerSkinsCloneHook));
 			harmony.PatchAll(typeof(NextCivilizationHook));
 			harmony.PatchAll(typeof(AiBuildOrderHook));
+			harmony.PatchAll(typeof(BuildOrdersHook));
 			harmony.PatchAll(typeof(StatisticsTechTreeHook));
 			harmony.PatchAll(typeof(StatisticsLearnableHook));
 			PlayerSkinsLookHooks.Install(harmony);
@@ -282,16 +283,18 @@ internal static class CivilizationGuard {
 
 /// <summary>
 /// An AI player chooses a build order with <c>AIPlay.SampleBuildOrder(random, civilization, strategies)</c>, which keeps the orders written for exactly that
-/// civilization and throws "No build order matching civilization=..." when there are none (a registered civilization has none). It gets the orders of the
-/// built-in civilization it looks like.
+/// civilization and throws "No build order matching civilization=..." when there are none. <see cref="BuildOrders"/> normally gives every registered
+/// civilization its orders; only when it could not (the demo, the tutorial) the civilization it looks like is asked instead.
 /// </summary>
 [HarmonyPatch(typeof(GameAIPlay), "SampleBuildOrder")]
 internal static class AiBuildOrderHook {
 	[HarmonyPrefix]
-	public static void Prefix(ref GameCivilization civilization) {
+	public static void Prefix(GameAIPlay __instance, ref GameCivilization civilization) {
 		try {
 			int id = (int)civilization;
 			if (id >= 0 && id <= 4) return;
+			if (__instance.buildOrders == null) __instance.InitBuildOrders();
+			if (BuildOrders.Loaded.Contains(id)) return;
 			if (CivilizationRegistry.TryGetSkinsLike(id, out int like)) civilization = (GameCivilization)like;
 		}
 		catch (Exception e) { CoreLog.Once("civ:ai", "AI build order hook: " + e.Message); }

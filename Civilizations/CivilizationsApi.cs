@@ -19,6 +19,9 @@ public sealed class ModCivilization {
 	/// <summary>Own models for buildings, units, nature and ships (everything left out looks like <see cref="SkinsLike"/>).</summary>
 	public CivilizationSkins Skins { get; } = new CivilizationSkins();
 	public void Remove() => CivilizationRegistry.Remove(this);
+	/// <summary>The plugin that added the civilization and its version: other players must have the same version to play it together.</summary>
+	public string ModId { get; internal set; } = "";
+	public string ModVersion { get; internal set; } = "0";
 }
 
 internal static class CivilizationRegistry {
@@ -44,14 +47,15 @@ internal static class CivilizationRegistry {
 		return id;
 	}
 
-	public static ModCivilization Add(string key, string name, Func<GameTechTree> techTree, int skinsLike) {
+	public static ModCivilization Add(string key, string name, Func<GameTechTree> techTree, int skinsLike, LobbyMod owner = null) {
 		int id = AllocateId(key);
 		var replaced = Items.Find(c => c.Id == id);
 		if (replaced != null && replaced.Name != name) CoreLog.Warn($"civilization id {id} is already used by '{replaced.Name}' - '{name}' replaces it.");
 		if (replaced != null) { Items.Remove(replaced); ModCore.Civilizations.RaiseRemoved(replaced); }
-		var civ = new ModCivilization(key, id, name, techTree, skinsLike);
+		var civ = new ModCivilization(key, id, name, techTree, skinsLike) { ModId = owner?.Id ?? "", ModVersion = owner?.Version ?? "0" };
 		Items.Add(civ);
 		CivilizationText.Set(id, new CivilizationName(name));
+		LobbyGroupRegistry.ForCivilization(id);   // its heading in the lobby rules list
 		LobbyState.PublishMods();   // the others learn that this client knows the civilization
 		ModCore.Civilizations.RaiseAdded(civ);
 		return civ;
@@ -126,6 +130,7 @@ public static partial class ModCore {
 					catch (Exception e) { CoreLog.Error("GameDataLoaded handler failed: " + e); }
 				}
 			}
+			GameBalance.Recompute("game data loaded");
 			Tools.DiskCache.Prune();   // the mods have asked for their caches by now: remove files nobody used for a few launches
 		}
 		internal static void RaiseAdded(ModCivilization civ) => Raise(Added, civ, "Civilizations.Added");
@@ -149,11 +154,13 @@ public static partial class ModCore {
 		/// The game sets a player's biome from the civilization with a switch over 0..4 and throws for anything else. The biome and visuals of this built-in
 		/// civilization (0 Europe, 1 Middle East, 2 Viking, 3 Ancient, 4 Maya) are used instead; the civilization itself keeps its own id.
 		/// </param>
+		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		public static ModCivilization Add(string key, string name, Func<GameTechTree> techTree = null, int skinsLike = 0) {
+			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());
 			Core.Ensure();
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("key is required", nameof(key));
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("name is required", nameof(name));
-			return CivilizationRegistry.Add(key, name, techTree, skinsLike);
+			return CivilizationRegistry.Add(key, name, techTree, skinsLike, owner);
 		}
 
 		/// <summary>
