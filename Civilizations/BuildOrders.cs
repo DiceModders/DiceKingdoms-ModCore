@@ -237,7 +237,7 @@ public static partial class ModCore {
 		/// <returns>How many blocks were accepted.</returns>
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		public static int AddBuildOrders(int civilization, string text) {
-			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());
+			var owner = LobbyMods.IdentifySimulation(System.Reflection.Assembly.GetCallingAssembly());
 			Core.Ensure();
 			return BuildOrders.Add(civilization, text, owner);
 		}
@@ -245,7 +245,7 @@ public static partial class ModCore {
 		/// <summary>Removes the build orders your mod added for a civilization.</summary>
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		public static void RemoveBuildOrders(int civilization) {
-			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());
+			var owner = LobbyMods.IdentifySimulation(System.Reflection.Assembly.GetCallingAssembly());
 			Core.Ensure();
 			BuildOrders.Remove(civilization, owner);
 		}

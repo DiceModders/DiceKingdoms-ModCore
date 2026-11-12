@@ -215,7 +215,7 @@ public static partial class ModCore {
 			Core.Ensure();
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("key is required", nameof(key));
 			foreach (var m in GameBalance.Mods) if (m.Key == key) return m;
-			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());
+			var owner = LobbyMods.IdentifySimulation(System.Reflection.Assembly.GetCallingAssembly());
 			var rule = Lobby.Rules.ToggleFor(owner, key, title, true, description ?? "This mod's building and technology values. Used only when every player has the mod; otherwise the game's values.");
 			var mod = new BalanceMod(key, priority, rule);
 			rule.Changed += _ => GameBalance.Recompute("lobby rule " + key);

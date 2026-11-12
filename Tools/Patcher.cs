@@ -86,7 +86,8 @@ public sealed class Patcher {
 	/// A patch that is only in the game while it is switched on: <c>var s = patcher.Switch(typeof(IslandGrid), "CanPlaceBuilding", typeof(MyPatches),
 	/// postfix: "After"); s.On = option.Value;</c>. Use it for methods the game calls very often (placement checks, AI scoring, every tile): a
 	/// Harmony patch costs a trip from the game into C# and back on EVERY call, even when its body returns at once. Switch it from the event that
-	/// changes the condition (a setting changed, the match started), never every frame. Starts off; the method is looked up now and logged like
+	/// changes the condition (a setting changed, the match started), never every frame. Never from inside the switch's own patch methods or from code
+	/// the patched method calls: Harmony would rebuild the method while it is running. Starts off; the method is looked up now and logged like
 	/// <see cref="Patch(Type, string, Type, string, string)"/>.
 	/// </summary>
 	public PatchSwitch Switch(Type type, string method, Type host, string prefix = null, string postfix = null) {

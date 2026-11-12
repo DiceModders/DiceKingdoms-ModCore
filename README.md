@@ -139,6 +139,30 @@ Every client publishes its rule keys and mod versions in its Steam member data (
 `Core.Lobby.Compatibility.Warnings` contains a line such as `"Alice does not have Meteors, this rule will be off for everyone in the match."`. `Core.Lobby.Compatibility.IsCompatible` is `Warnings.Count == 0`.
 Screens (ModBridge) show these lines; your mod can also block a start button or log them.
 
+Every client also publishes a fingerprint of each mod DLL that changes the simulation (`modcore.builds`: a mod with a simulation rule, a civilization,
+AI build orders, balance or unit-stat changes). Same version but a different file gives a warning such as `"Alice has a different build of Lobby Rules
+1.0.0: if the match desyncs, use the same files."` The match still uses the mod. To keep the fingerprint the same for everybody who builds the same
+code, build reproducibly (the DiceModders mods do):
+
+```xml
+<PropertyGroup>
+  <Deterministic>true</Deterministic>
+  <PathMap>$(MSBuildProjectDirectory)\=/_/</PathMap>
+  <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  <EnableSourceLink>false</EnableSourceLink>
+  <EmbedUntrackedSources>false</EmbedUntrackedSources>
+</PropertyGroup>
+```
+
+A Debug build differs from a Release build of the same code (other code is compiled), so it is reported too.
+
+### The host decides the match's rule values
+
+When the rules are fixed for a match (the islands start to spawn), the host writes the values it uses into the lobby data (`modcore.decision`), and
+clears them when the match ends. A client that fixes its rules later takes the host's values instead of deciding by itself, so a player whose lobby
+data or member list was late, or who rejoins after a member without the mod left, plays with the same values as the host. Without the host's values
+(they have not arrived yet) every computer decides by itself from the lobby data, as before.
+
 ## Match
 
 Everything about the running match. The events come from the game's own `GameState` events, so they are raised on every machine (host and clients), on the main thread.

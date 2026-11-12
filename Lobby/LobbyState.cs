@@ -16,6 +16,12 @@ namespace DiceModders.ModCore;
 internal static class LobbyState {
 	private const string ModsKey = "modcore.mods";
 	private const string CivsKey = "modcore.civs";
+	private const string BuildsKey = "modcore.builds";
+	private static readonly Dictionary<ulong, Dictionary<string, (string Version, string Build)>> MemberBuilds = new();
+
+	/// <summary>The version and DLL fingerprint a member published for a mod, or null when it published none (an older ModCore, or no such mod).</summary>
+	public static (string Version, string Build)? MemberBuildOf(ulong steamId, string modId) =>
+		MemberBuilds.TryGetValue(steamId, out var map) && map.TryGetValue(LobbyMods.Clean(modId), out var b) ? b : null;
 
 	private static SteamLobby? _lobby;
 	private static ulong _owner;
@@ -214,6 +220,7 @@ internal static class LobbyState {
 		_members = Array.Empty<LobbyMember>();
 		MemberKeys.Clear();
 		MemberCivs.Clear();
+		MemberBuilds.Clear();
 		CivilizationTable.Clear();   // no lobby: civilization numbers are this computer's own again
 		LobbyRuleRegistry.ReevaluateAll();
 		ModCore.Lobby.RaiseChanged();
@@ -246,6 +253,9 @@ internal static class LobbyState {
 		CoreLog.Info($"lobby rules fixed for the match ({why})");
 		CivilizationTable.Freeze();
 		LobbyRuleRegistry.FreezeAll();
+		// the host's values for this match: clients that freeze later (late lobby data, a rejoin) use them instead of deciding by themselves
+		if (IsHost && !SetLobbyData(LobbyRuleRegistry.DecisionKey, LobbyRuleRegistry.DescribeDecision()))
+			CoreLog.Warn("lobby rules: could not publish the host's decision");
 	}
 
 	private static void UnfreezeRules() {
@@ -253,6 +263,7 @@ internal static class LobbyState {
 		RulesFrozen = false;
 		CivilizationTable.Unfreeze();
 		LobbyRuleRegistry.UnfreezeAll();
+		if (IsHost) SetLobbyData(LobbyRuleRegistry.DecisionKey, "");   // the next match decides again; an old decision must not be read for it
 	}
 
 	/// <summary>Back in the lobby or the menu: rules follow the lobby again (or fall back to their defaults outside one).</summary>
@@ -300,6 +311,8 @@ internal static class LobbyState {
 		if (id == LocalSteamId) return false;   // our own keys are known without asking Steam
 		var keys = LobbyRuleRegistry.ParseKeys(lobby.GetMemberData(member, ModsKey));
 		if (keys != null) MemberKeys[id] = keys; else MemberKeys.Remove(id);
+		var builds = LobbyMods.ParseBuilds(lobby.GetMemberData(member, BuildsKey));
+		if (builds != null) MemberBuilds[id] = builds; else MemberBuilds.Remove(id);
 
 		var civs = new HashSet<string>();
 		string raw = lobby.GetMemberData(member, CivsKey);   // "v3" + "key@version" list
@@ -316,6 +329,7 @@ internal static class LobbyState {
 		if (!_lobby.HasValue) return;
 		try {
 			_lobby.Value.SetMemberData(ModsKey, LobbyRuleRegistry.DescribeMods());
+			_lobby.Value.SetMemberData(BuildsKey, LobbyMods.DescribeBuilds());
 			MemberKeys[LocalSteamId] = LobbyRuleRegistry.ParseKeys(LobbyRuleRegistry.DescribeMods()) ?? new HashSet<string>();
 			var civKeys = new List<string>();
 			foreach (var c in CivilizationRegistry.All) civKeys.Add(CivTag(c));

@@ -174,7 +174,7 @@ public static partial class ModCore {
 		/// </param>
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		public static ModCivilization Add(string key, string name, Func<GameTechTree> techTree = null, int skinsLike = 0) {
-			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());
+			var owner = LobbyMods.IdentifySimulation(System.Reflection.Assembly.GetCallingAssembly());
 			Core.Ensure();
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("key is required", nameof(key));
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("name is required", nameof(name));

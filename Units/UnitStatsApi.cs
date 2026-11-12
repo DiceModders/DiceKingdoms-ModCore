@@ -240,7 +240,7 @@ public static partial class ModCore {
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		public static UnitStatsMod Register(string key, string title, int priority = 0, string description = null) {
 			Core.Ensure();
-			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());   // the rule belongs to the calling mod, not ModCore
+			var owner = LobbyMods.IdentifySimulation(System.Reflection.Assembly.GetCallingAssembly());   // the rule belongs to the calling mod, not ModCore
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("key is required", nameof(key));
 			foreach (var m in UnitStatsRegistry.Mods) if (m.Key == key) return m;
 			var rule = Lobby.Rules.ToggleFor(owner, key, title, true, description ?? "This mod's unit stats. Used only when every player has the mod; otherwise the game's values.");

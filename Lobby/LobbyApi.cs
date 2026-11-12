@@ -33,6 +33,10 @@ internal interface ILobbyRuleInternal : ILobbyRule {
 	/// <summary>Fixed for the match with a value that changes the simulation: a player without this rule cannot play this match.</summary>
 	bool InUse { get; }
 	void Freeze();
+	/// <summary>Fixes the rule with the host's decided value (its lobby-data text); false when the text cannot be read (then <see cref="Freeze"/> is used).</summary>
+	bool FreezeFrom(string raw);
+	/// <summary>The frozen value as lobby-data text (what the host publishes as its decision).</summary>
+	string FrozenRaw { get; }
 	void Unfreeze();
 	void Reevaluate();
 }
@@ -56,6 +60,7 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 		Mod = mod; Key = key; Title = title; Default = defaultValue; Description = description; AffectsSimulation = affectsSimulation;
 		_visible = visible; _write = write; _read = read;
 		_reported = defaultValue;
+		if (affectsSimulation) LobbyMods.MarkSimulation(mod);   // its DLL fingerprint is compared in the lobby
 	}
 
 	/// <summary>The id the rule was registered with, unique per mod (prefix it with your mod name).</summary>
@@ -146,6 +151,18 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 		_isFrozen = true;
 		if (missing != null) Reevaluate();
 	}
+
+	bool ILobbyRuleInternal.FreezeFrom(string raw) {
+		if (raw == null) return false;
+		var (ok, value) = _read(raw);
+		if (!ok) return false;
+		_frozen = value;
+		_isFrozen = true;
+		Reevaluate();
+		return true;
+	}
+
+	string ILobbyRuleInternal.FrozenRaw => _write(_isFrozen ? _frozen : Live);
 
 	void ILobbyRuleInternal.Unfreeze() {
 		_isFrozen = false;

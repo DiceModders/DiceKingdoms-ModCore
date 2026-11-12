@@ -77,7 +77,7 @@ public static partial class ModCore {
 		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 		public static LobbyRule<bool> ReplaceTree(int builtInCivilization, Func<GameTechTree> tree, string ruleKey, string title, string description = null) {
 			Core.Ensure();
-			var owner = LobbyMods.Identify(System.Reflection.Assembly.GetCallingAssembly());
+			var owner = LobbyMods.IdentifySimulation(System.Reflection.Assembly.GetCallingAssembly());
 			if (builtInCivilization < 0 || builtInCivilization > 4) throw new ArgumentOutOfRangeException(nameof(builtInCivilization), "0..4 (a mod civilization gives its tree to Add)");
 			if (tree == null) throw new ArgumentNullException(nameof(tree));
 			var rule = Lobby.Rules.ToggleFor(owner, ruleKey, title, true,

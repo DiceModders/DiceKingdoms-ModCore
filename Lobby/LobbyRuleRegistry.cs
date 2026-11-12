@@ -27,7 +27,48 @@ internal static class LobbyRuleRegistry {
 	}
 
 	public static void ReevaluateAll() { foreach (var r in Rules.ToArray()) Safe(r.Reevaluate); }
-	public static void FreezeAll() { foreach (var r in Rules.ToArray()) Safe(r.Freeze); }
+	/// <summary>
+	/// Fixes every rule for the match. A client uses the host's decision (<see cref="DecisionKey"/>) when it is there: the host decided with its own
+	/// view of the lobby, and a client whose lobby data or member list is late (or a player who rejoins after a member without the mod left) could
+	/// otherwise decide differently and build islands of another size. Without a decision every computer decides by itself, as before.
+	/// </summary>
+	public static void FreezeAll() {
+		var decided = LobbyState.IsHost ? null : ReadDecision(LobbyState.GetLobbyData(DecisionKey));
+		int used = 0;
+		foreach (var r in Rules.ToArray())
+			Safe(() => {
+				if (decided != null && decided.TryGetValue(Clean(r.Key), out var raw) && r.FreezeFrom(raw)) used++;
+				else r.Freeze();
+			});
+		if (decided != null) CoreLog.Info($"lobby rules: {used} value(s) taken from the host's decision");
+	}
+
+	/// <summary>Lobby data the host writes when it fixes the rules: every rule's value for this match. Cleared when the match ends.</summary>
+	public const string DecisionKey = "modcore.decision";
+	private const char EntrySep = '\u001e', FieldSep = '\u001f';
+
+	public static string DescribeDecision() {
+		var sb = new StringBuilder("d1");
+		foreach (var r in Rules) {
+			// a mod the host switched off is announced as missing: leave its rules out, so clients decide "default" by themselves as before
+			if (!ModSwitches.IsOn(r.Mod.Id)) continue;
+			string raw;
+			try { raw = r.FrozenRaw; } catch (Exception e) { CoreLog.Once("decision:" + r.Key, "lobby rule '" + r.Key + "': " + e.Message); continue; }
+			if (raw == null) continue;
+			sb.Append(EntrySep).Append(Clean(r.Key)).Append(FieldSep).Append(raw.Replace(EntrySep, ' ').Replace(FieldSep, ' '));
+		}
+		return sb.ToString();
+	}
+
+	private static Dictionary<string, string> ReadDecision(string data) {
+		if (string.IsNullOrEmpty(data) || !data.StartsWith("d1")) return null;
+		var map = new Dictionary<string, string>();
+		foreach (var entry in data.Split(EntrySep)) {
+			int at = entry.IndexOf(FieldSep);
+			if (at > 0) map[entry.Substring(0, at)] = entry.Substring(at + 1);
+		}
+		return map;
+	}
 	public static void UnfreezeAll() { foreach (var r in Rules.ToArray()) Safe(r.Unfreeze); }
 
 	private static void Safe(Action a) {
@@ -96,6 +137,16 @@ internal static class LobbyRuleRegistry {
 				lines.Add(other != null
 					? $"{member.Name} has {rule.Mod.Name} {other}, the host has {rule.ModVersion}: this rule will be off for everyone in the match."
 					: $"{member.Name} does not have {rule.Mod.Name}, this rule will be off for everyone in the match.");
+			}
+		}
+		// same version, different file: a changed build (or a Debug build) may play differently. Only a warning: the match still uses the mod.
+		foreach (var mod in LobbyMods.Simulation) {
+			if (string.IsNullOrEmpty(mod.Build) || !ModSwitches.IsOn(mod.Id)) continue;
+			foreach (var member in LobbyState.Members) {
+				if (member.IsLocal) continue;
+				var theirs = LobbyState.MemberBuildOf(member.SteamId, mod.Id);
+				if (theirs == null || theirs.Value.Version != LobbyMods.Clean(mod.Version) || string.IsNullOrEmpty(theirs.Value.Build) || theirs.Value.Build == mod.Build) continue;
+				lines.Add($"{member.Name} has a different build of {mod.Name} {mod.Version}: if the match desyncs, use the same files.");
 			}
 		}
 		return lines;
