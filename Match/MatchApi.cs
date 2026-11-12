@@ -51,7 +51,7 @@ public static partial class ModCore {
 		public static event Action IslandsSpawned { add { Core.Ensure(); _islandsSpawned += value; } remove { _islandsSpawned -= value; } }
 		private static Action _islandsSpawned;
 
-		/// <summary>The match started. Lobby rules are frozen before this is raised.</summary>
+		/// <summary>The match started. Lobby rules were already frozen when the islands started to spawn.</summary>
 		public static event Action Started { add { Core.Ensure(); _started += value; } remove { _started -= value; } }
 		private static Action _started;
 

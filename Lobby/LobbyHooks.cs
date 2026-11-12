@@ -16,6 +16,8 @@ internal static class LobbyHooks {
 		_installed = true;
 		try {
 			var harmony = new Harmony("DiceModders.ModCore.lobby");
+			harmony.PatchAll(typeof(SpawnIslandsPatch));
+			harmony.PatchAll(typeof(IslandArrivesPatch));
 			harmony.PatchAll(typeof(MatchStartPatch));
 			harmony.PatchAll(typeof(MatchEndPatch));
 			harmony.PatchAll(typeof(SteamInitPatch));
@@ -45,6 +47,32 @@ internal static class LobbyHooks {
 		public static void Postfix() {   // the game is in one lobby at a time: leaving means the current one (no struct __instance under IL2CPP)
 			try { LobbyState.LeftByGame(0); }
 			catch (Exception e) { CoreLog.Once("lobby:leave", "lobby: leave hook: " + e); }
+		}
+	}
+
+	/// <summary>
+	/// The host makes every island in <c>GameState.SpawnIslands</c> (called from <c>UpdateInit</c>), then spawns them on the network; <c>StartGame</c>
+	/// follows only after every player has loaded them. Rules are fixed here so island-shaping rules see their match value.
+	/// </summary>
+	[HarmonyPatch(typeof(GameState), "SpawnIslands")]
+	private static class SpawnIslandsPatch {
+		[HarmonyPrefix, HarmonyPriority(Priority.First)]
+		public static void Prefix() {
+			try { LobbyState.IslandsSpawning(); }
+			catch (Exception e) { CoreLog.Once("lobby:spawn", "lobby: island spawn hook: " + e); }
+		}
+	}
+
+	/// <summary>
+	/// A client never runs <c>SpawnIslands</c>: the islands arrive as network spawns and wake up from the island prefab. In a lobby that is not ours, the
+	/// first island waking up is the start of the match. Runs before other mods' <c>IslandGrid.Awake</c> prefixes.
+	/// </summary>
+	[HarmonyPatch(typeof(DiceKingdoms.Game.IslandGrid), "Awake")]
+	private static class IslandArrivesPatch {
+		[HarmonyPrefix, HarmonyPriority(Priority.First)]
+		public static void Prefix() {
+			try { if (LobbyState.InLobby && !LobbyState.IsHost) LobbyState.IslandsSpawning(); }
+			catch (Exception e) { CoreLog.Once("lobby:island", "lobby: island arrive hook: " + e); }
 		}
 	}
 

@@ -61,7 +61,7 @@ public class MyModPlugin : BasePlugin {
 
 1. Install **ModCore** (and, to see the rule on screen, **UiKit** + **ModBridge**) in `BepInEx\plugins`, then your mod.
 2. In the lobby the host sees "Meteors" under Settings > Lobby > Rules (ModBridge). Guests see the host's value, read-only.
-3. If the host turns Meteors off and a guest has no `MyMod`, everybody sees the warning "<guest> does not have My Mod, this rule may desync."
+3. If the host turns Meteors off and a guest has no `MyMod`, everybody sees the warning "<guest> does not have My Mod, this rule will be off for everyone in the match."
 4. When the match starts the value freezes; `Value` stays the same until the match ends.
 
 ## Thunderstore `manifest.json` (excerpt)

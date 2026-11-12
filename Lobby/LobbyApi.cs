@@ -30,6 +30,8 @@ public interface ILobbyRule {
 
 internal interface ILobbyRuleInternal : ILobbyRule {
 	LobbyMod Mod { get; }
+	/// <summary>Fixed for the match with a value that changes the simulation: a player without this rule cannot play this match.</summary>
+	bool InUse { get; }
 	void Freeze();
 	void Unfreeze();
 	void Reevaluate();
@@ -70,10 +72,13 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 	public int Min { get; internal set; }
 	public int Max { get; internal set; }
 	public int Step { get; internal set; } = 1;
+	/// <summary>For a rule made with <c>Rules.Choice</c>: the names of the values 0, 1, 2 ... (screens show a drop-down); null for a plain number.</summary>
+	public IReadOnlyList<string> Choices { get; internal set; }
 
 	/// <summary>
 	/// The value to simulate with. Outside a lobby it is <see cref="Default"/>; in the lobby it is the host's current value; from the moment the match
-	/// starts it is a frozen copy (changes during a match are ignored) until the lobby or menu is shown again.
+	/// starts (from the moment the islands start to spawn, which is a little before the match itself) it is a frozen copy (changes during a match are
+	/// ignored) until the lobby or menu is shown again.
 	/// </summary>
 	public T Value => _isFrozen ? _frozen : Live;
 
@@ -88,7 +93,7 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 	}
 
 	/// <summary>The host can change it before the match; with no Steam lobby (a local game) the local player can.</summary>
-	public bool Editable => !LobbyState.MatchRunning && (LobbyState.IsHost || !LobbyState.InLobby);
+	public bool Editable => !LobbyState.RulesFrozen && (LobbyState.IsHost || !LobbyState.InLobby);
 
 	public bool Visible {
 		get {
@@ -125,11 +130,21 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 
 	internal LobbyMod Mod { get; }
 	LobbyMod ILobbyRuleInternal.Mod => Mod;
+	bool ILobbyRuleInternal.InUse => AffectsSimulation && _isFrozen && !EqualityComparer<T>.Default.Equals(_frozen, Default);
 	private string StorageKey => "modcore.rule." + Key;
 
 	void ILobbyRuleInternal.Freeze() {
-		_frozen = Live;       // the effective value does not change here, so there is no Changed event
+		var live = Live;
+		_frozen = live;
+		// A rule that changes the simulation is only used when every lobby member has this mod in the same version; otherwise everybody plays
+		// the default (every computer reads the same lobby data, so all of them decide the same way and nobody desyncs).
+		string missing = AffectsSimulation && !EqualityComparer<T>.Default.Equals(live, Default) ? LobbyRuleRegistry.FirstMissing(this) : null;
+		if (missing != null) {
+			_frozen = Default;
+			CoreLog.Warn($"lobby rule '{Key}' is off for this match: {missing} does not have {Mod.Name} {ModVersion}.");
+		}
 		_isFrozen = true;
+		if (missing != null) Reevaluate();
 	}
 
 	void ILobbyRuleInternal.Unfreeze() {
@@ -195,6 +210,12 @@ public static partial class ModCore {
 			/// <summary>Every registered rule, in registration order.</summary>
 			public static IReadOnlyList<ILobbyRule> All => LobbyRuleRegistry.All;
 
+			/// <summary>
+			/// True from the moment the islands start to spawn until the match ends: every <c>Value</c> is the match value. Rules that shape the islands
+			/// (read in <c>IslandGrid.Awake</c> or <c>GameState.SpawnIslands</c>) should only act while this is true, so menu and editor islands stay normal.
+			/// </summary>
+			public static bool Fixed => LobbyState.RulesFrozen;
+
 			/// <summary>Raised when a rule is registered.</summary>
 			public static event Action<ILobbyRule> Registered;
 			internal static void RaiseRegistered(ILobbyRule rule) {
@@ -232,11 +253,40 @@ public static partial class ModCore {
 				rule.Min = lo; rule.Max = hi; rule.Step = Math.Max(1, step);
 				return rule;
 			}
+
+			/// <summary>
+			/// A text value the host sets, for data a mod's own window edits (for example many changed values in one compact string). It is synced,
+			/// frozen and checked like every rule, but rule screens (ModBridge) draw no row for it. Steam keeps up to about 8 KB per value.
+			/// </summary>
+			[MethodImpl(MethodImplOptions.NoInlining)]
+			public static LobbyRule<string> Text(string key, string title, string defaultValue = "", string description = null, Func<bool> visible = null,
+			                                     bool affectsSimulation = true) {
+				var mod = LobbyMods.Identify(Assembly.GetCallingAssembly());
+				return LobbyRuleRegistry.Register(key, () => new LobbyRule<string>(mod, key, title, defaultValue ?? "", description, visible, affectsSimulation,
+					v => v ?? "", raw => (true, raw ?? "")));
+			}
+
+			/// <summary>
+			/// One of a few named choices, stored as its number (0 = the first). Screens show a drop-down with <paramref name="choices"/>.
+			/// Use it instead of several toggles that exclude each other.
+			/// </summary>
+			[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+			public static LobbyRule<int> Choice(string key, string title, int defaultIndex, IReadOnlyList<string> choices, string description = null,
+			                                    Func<bool> visible = null, bool affectsSimulation = true) {
+				if (choices == null || choices.Count == 0) throw new ArgumentException("at least one choice is needed", nameof(choices));
+				var mod = LobbyMods.Identify(Assembly.GetCallingAssembly());
+				int hi = choices.Count - 1;
+				var rule = LobbyRuleRegistry.Register(key, () => new LobbyRule<int>(mod, key, title, Math.Clamp(defaultIndex, 0, hi), description, visible, affectsSimulation,
+					v => v.ToString(System.Globalization.CultureInfo.InvariantCulture),
+					raw => int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int v) ? (true, Math.Clamp(v, 0, hi)) : (false, 0)));
+				rule.Min = 0; rule.Max = hi; rule.Step = 1; rule.Choices = new List<string>(choices);
+				return rule;
+			}
 		}
 
 		/// <summary>Who in the lobby is missing a mod whose rule the host has changed.</summary>
 		public static class Compatibility {
-			/// <summary>One line per member and mod: "&lt;name&gt; does not have &lt;mod&gt;, this rule may desync." Empty when everybody is fine (and always during a match).</summary>
+			/// <summary>One line per member and mod: "&lt;name&gt; does not have &lt;mod&gt;, this rule will be off for everyone in the match." Empty when everybody is fine (and always during a match).</summary>
 			public static IReadOnlyList<string> Warnings { get { Core.Ensure(); return LobbyRuleRegistry.Warnings(); } }
 
 			/// <summary>True when <see cref="Warnings"/> is empty.</summary>

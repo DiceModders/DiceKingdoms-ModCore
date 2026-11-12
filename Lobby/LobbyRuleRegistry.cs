@@ -68,6 +68,21 @@ internal static class LobbyRuleRegistry {
 		return keys;
 	}
 
+	/// <summary>The name of the first other lobby member who has not published this rule in the same mod version, or null when everybody has it.</summary>
+	public static string FirstMissing(ILobbyRule rule) {
+		if (!LobbyState.InLobby) return null;
+		foreach (var member in LobbyState.Members)
+			if (!member.IsLocal && !LobbyState.MemberHasKey(member.SteamId, TagOf(rule))) return member.Name;
+		return null;
+	}
+
+	/// <summary>The first rule this match uses that the member has not published in the same mod version, or null when it can play the match.</summary>
+	public static ILobbyRule FirstInUseMissing(ulong steamId) {
+		foreach (var rule in Rules)
+			if (rule.InUse && !LobbyState.MemberHasKey(steamId, TagOf(rule))) return rule;
+		return null;
+	}
+
 	public static IReadOnlyList<string> Warnings() {
 		var lines = new List<string>();
 		if (!LobbyState.InLobby || LobbyState.MatchRunning) return lines;
@@ -79,8 +94,8 @@ internal static class LobbyRuleRegistry {
 				if (!seen.Add(member.SteamId + "|" + rule.Mod.Id)) continue;
 				string other = LobbyState.MemberVersionOf(member.SteamId, Clean(rule.Key));
 				lines.Add(other != null
-					? $"{member.Name} has {rule.Mod.Name} {other}, the host has {rule.ModVersion}: this rule may desync."
-					: $"{member.Name} does not have {rule.Mod.Name}, this rule may desync.");
+					? $"{member.Name} has {rule.Mod.Name} {other}, the host has {rule.ModVersion}: this rule will be off for everyone in the match."
+					: $"{member.Name} does not have {rule.Mod.Name}, this rule will be off for everyone in the match.");
 			}
 		}
 		return lines;

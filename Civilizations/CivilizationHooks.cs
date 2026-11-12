@@ -70,15 +70,22 @@ internal static class TechTreeLookupHook {
 /// </summary>
 [HarmonyPatch(typeof(GamePlayer), "NextCivilization")]
 internal static class NextCivilizationHook {
+	/// <summary>The player's real ready flag (the synced field): the StartGameReady getter can be patched by other mods, e.g. a "force ready" cheat.</summary>
+	private static bool IsReady(GamePlayer p) { try { return p.startGameReady != null && p.startGameReady.Value; } catch { return false; } }
+
 	[HarmonyPrefix]
 	public static bool Prefix(GamePlayer __instance) {
 		try {
+			CoreLog.Info("civilization cycle: castle clicked (server " + __instance.IsServer + ", ready " + IsReady(__instance) + ", mod civilizations " + CivilizationRegistry.All.Count + ")");
 			if (!__instance.IsServer) return true;                 // clients ask the host through an RPC, which ends up here
 			var all = new List<ModCivilization>(CivilizationRegistry.All);
 			if (all.Count == 0) return true;
 			// A member without the mod would throw when the game sends it the number, so only civilizations everybody has are offered.
 			var mods = all.FindAll(c => LobbyState.EveryoneHasCivilization(c));
-			if (__instance.StartGameReady) return true;            // the game itself ignores clicks once the player is ready
+			if (mods.Count < all.Count)
+				CoreLog.Once("civ:missing:" + mods.Count + "/" + all.Count, $"civilization cycle: {all.Count - mods.Count} mod civilization(s) skipped, a lobby member does not have them " +
+				                                                             "in the same version: " + string.Join(", ", all.FindAll(c => !mods.Contains(c)).ConvertAll(c => c.Name)));
+			if (IsReady(__instance)) return true;                  // the game itself ignores clicks once the player is ready
 			var current = __instance.Skins;
 			if (current == null) return true;
 			int previous = (int)current.civilization;
@@ -86,7 +93,7 @@ internal static class NextCivilizationHook {
 			int index = -1;
 			for (int i = 0; i < mods.Count; i++) if (mods[i].Id == previous) index = i;
 			if (mods.Count == 0) return true;   // nothing to add for this lobby: the game's own cycle
-			if (index < 0 && all.Exists(c => c.Id == previous)) return true;   // standing on a civilization somebody lacks: back to the game's cycle
+			if (index < 0 && all.Exists(c => c.Id == previous)) { CoreLog.Info("civilization cycle: on a mod civilization somebody lacks, back to the game's cycle"); return true; }
 
 			int next = -1;
 			if (index >= 0) {
@@ -95,6 +102,8 @@ internal static class NextCivilizationHook {
 			else {
 				var unlocked = __instance.Inventory?.UnlockedCivilizations;
 				if (unlocked != null && unlocked.Length > 0 && (int)unlocked[unlocked.Length - 1] == previous) next = mods[0].Id;
+				CoreLog.Info($"civilization cycle: on {previous}, last unlocked = {(unlocked != null && unlocked.Length > 0 ? (int)unlocked[unlocked.Length - 1] : -1)}" +
+				             (next >= 0 ? $", next = mod civilization {next}" : ", the game's own next"));
 			}
 			if (next < 0) return true;
 
@@ -266,15 +275,20 @@ internal static class CivilizationGuard {
 	public static void Run() {
 		using var slow = CoreLog.Slow("civilization guard");
 		try {
-			if (CivilizationRegistry.All.Count == 0 || !LobbyState.InLobby || !LobbyState.IsHost || LobbyState.MatchRunning) return;
+			if (!LobbyState.InLobby || !LobbyState.IsHost || LobbyState.RulesFrozen) return;
 			foreach (var player in UnityEngine.Object.FindObjectsOfType<GamePlayer>()) {
 				if (player == null || !player.IsServer) continue;
 				var current = player.Skins;
 				if (current == null) continue;
-				var civ = CivilizationRegistry.Find((int)current.civilization);
-				if (civ == null || LobbyState.EveryoneHasCivilization(civ)) continue;
-				player.skins.Value = new GamePlayerSkins((GameCivilization)civ.SkinsLike, player.skinRegistry);
-				CoreLog.Warn($"'{civ.Name}' is not installed for everybody in the lobby; a player was moved to the civilization it looks like.");
+				int number = (int)current.civilization;
+				if (number < CivilizationRegistry.FirstId) continue;   // built-in
+				var civ = CivilizationRegistry.Find(number);
+				if (civ != null && LobbyState.EveryoneHasCivilization(civ)) continue;
+				// a civilization somebody lacks, or one this computer no longer has (its mod was switched off): the civilization it looks like, else Europe
+				player.skins.Value = new GamePlayerSkins((GameCivilization)(civ?.SkinsLike ?? 0), player.skinRegistry);
+				CoreLog.Warn(civ != null
+					? $"'{civ.Name}' is not installed for everybody in the lobby; a player was moved to the civilization it looks like."
+					: $"civilization {number} was removed; a player was moved to Europe.");
 			}
 		}
 		catch (Exception e) { CoreLog.Once("civ:guard", "civilization guard: " + e.Message); }

@@ -26,6 +26,8 @@ internal static class LobbyState {
 	private static bool _subscribed;
 
 	public static bool MatchRunning { get; private set; }
+	/// <summary>Rule values are fixed for the coming match. Set when the islands start to spawn, which is before <see cref="MatchStarted"/>.</summary>
+	public static bool RulesFrozen { get; private set; }
 	public static bool InLobby => _lobby.HasValue;
 	public static SteamLobby? Current => _lobby;
 	public static IReadOnlyList<LobbyMember> Members => _members;
@@ -57,21 +59,30 @@ internal static class LobbyState {
 		return null;
 	}
 
-	/// <summary>True when every other member published the same civilization with the same number (a client without it would not know what the number means).</summary>
+	/// <summary>
+	/// True when every other member can play this civilization with us: it is in the host's civilization table (<see cref="CivilizationTable"/>, which
+	/// translates the numbers) and every member published the same civilization in the same mod version ("key@version"). A host without ModCore has
+	/// no table, so mod civilizations cannot be picked in its lobby.
+	/// </summary>
 	public static bool EveryoneHasCivilization(ModCivilization civ) {
 		if (!_lobby.HasValue) return true;
-		string clean = CivTag(civ);
+		if (CivilizationTable.NumberOf(civ) < 0) return false;
+		string tag = CivTag(civ);
 		ulong me = LocalSteamId;
 		foreach (var m in _members) {
 			if (m.SteamId == me) continue;
-			if (!(MemberCivs.TryGetValue(m.SteamId, out var set) && set.Contains(clean))) return false;
+			if (!(MemberCivs.TryGetValue(m.SteamId, out var set) && set.Contains(tag))) return false;
 		}
 		return true;
 	}
 
+	/// <summary>The member published this civilization in the same mod version.</summary>
+	public static bool MemberHasCivilization(ulong steamId, ModCivilization civ) =>
+		MemberCivs.TryGetValue(steamId, out var set) && set.Contains(CivTag(civ));
+
 	private static string CleanCivKey(string key) => (key ?? "").Replace(',', '_').Replace(';', '_').Replace('@', '_');
-	/// <summary>"key=id@version": the same civilization, the same number and the same mod version (another version may play differently).</summary>
-	private static string CivTag(ModCivilization c) => CleanCivKey(c.Key) + "=" + c.Id + "@" + CleanCivKey(c.ModVersion);
+	/// <summary>"key@version": the same civilization in the same mod version (another version may play differently); numbers come from the table.</summary>
+	private static string CivTag(ModCivilization c) => CleanCivKey(c.Key) + "@" + CleanCivKey(c.ModVersion);
 
 	// ------------------------------------------------------------------ subscription
 
@@ -95,6 +106,7 @@ internal static class LobbyState {
 		if (owner == _owner) return;
 		CoreLog.Trace("lobby owner changed");
 		Reload();
+		PublishCivilizationTable();   // the new host keeps the table and adds its own missing civilizations
 		LobbyRuleRegistry.ReevaluateAll();
 		ModCore.Lobby.RaiseChanged();
 	}
@@ -146,6 +158,8 @@ internal static class LobbyState {
 			MemberCivs.Clear();
 			Reload();
 			CoreLog.Trace($"lobby entered: id={lobby.Id.Value} members={_members.Length} host={(IsHost ? "me" : _owner.ToString())}");
+			CivilizationTable.Clear();
+			ReadCivilizationTable(lobby);
 			PublishMods();
 			LobbyRuleRegistry.ReevaluateAll();
 			ModCore.Lobby.RaiseChanged();
@@ -161,6 +175,7 @@ internal static class LobbyState {
 			if (!IsCurrent(lobby)) return;
 			_dataEvents++;
 			CheckOwner(lobby);
+			ReadCivilizationTable(lobby);   // one string compare when it did not change
 			LobbyRuleRegistry.ReevaluateAll();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:data", "lobby: data handler: " + e); }
@@ -199,6 +214,7 @@ internal static class LobbyState {
 		_members = Array.Empty<LobbyMember>();
 		MemberKeys.Clear();
 		MemberCivs.Clear();
+		CivilizationTable.Clear();   // no lobby: civilization numbers are this computer's own again
 		LobbyRuleRegistry.ReevaluateAll();
 		ModCore.Lobby.RaiseChanged();
 	}
@@ -211,19 +227,41 @@ internal static class LobbyState {
 		if (MatchRunning) return;
 		TraceDataEvents("match start"); CoreLog.Info($"match started (inLobby={InLobby}, host={IsHost}, rules={LobbyRuleRegistry.All.Count})");
 		MatchRunning = true;
-		LobbyRuleRegistry.FreezeAll();
+		FreezeRules("match start");
 		GameBalance.Recompute("match started");   // building/technology values are fixed for the whole match from here
 		BuildOrders.ResetLoaded();   // the AI reads its build orders again, with the trees active for this match
 		ModCore.Match.RaiseStarted();
 	}
 
+	/// <summary>
+	/// The islands are about to be made: on the host <c>GameState.SpawnIslands</c> (it generates every island and spawns them on the network), on a client the
+	/// first island that arrives. Both come before <c>StartGame</c>, so rules that shape the islands (grid size, land radius) must be fixed here, with the
+	/// same "a member lacks the mod: default for everyone" decision every computer makes from the same lobby data.
+	/// </summary>
+	public static void IslandsSpawning() => FreezeRules("islands spawning");
+
+	private static void FreezeRules(string why) {
+		if (RulesFrozen) return;
+		RulesFrozen = true;
+		CoreLog.Info($"lobby rules fixed for the match ({why})");
+		CivilizationTable.Freeze();
+		LobbyRuleRegistry.FreezeAll();
+	}
+
+	private static void UnfreezeRules() {
+		if (!RulesFrozen) return;
+		RulesFrozen = false;
+		CivilizationTable.Unfreeze();
+		LobbyRuleRegistry.UnfreezeAll();
+	}
+
 	/// <summary>Back in the lobby or the menu: rules follow the lobby again (or fall back to their defaults outside one).</summary>
 	public static void MatchEnded() {
 		MatchState.Clear();
-		if (!MatchRunning) return;
+		if (!MatchRunning) { UnfreezeRules(); return; }   // left while the islands were spawning: the rules follow the lobby again
 		TraceDataEvents("match end"); CoreLog.Info("match ended");
 		MatchRunning = false;
-		LobbyRuleRegistry.UnfreezeAll();
+		UnfreezeRules();
 		ModSwitches.MatchEnded();   // mods switched on/off during the match take effect now
 		UnitStatsRegistry.MatchEnded();   // unit-stat changes made during the match too
 		GameBalance.MatchEnded();
@@ -264,8 +302,8 @@ internal static class LobbyState {
 		if (keys != null) MemberKeys[id] = keys; else MemberKeys.Remove(id);
 
 		var civs = new HashSet<string>();
-		string raw = lobby.GetMemberData(member, CivsKey);
-		if (!string.IsNullOrEmpty(raw) && raw.StartsWith("v2"))   // older ModCore (v1, no versions) counts as not having the civilization
+		string raw = lobby.GetMemberData(member, CivsKey);   // "v3" + "key@version" list
+		if (!string.IsNullOrEmpty(raw) && raw.StartsWith("v3"))
 			foreach (var k in raw.Substring(2).Split(',')) if (k.Length > 0) civs.Add(k);
 		MemberCivs.TryGetValue(id, out var before);
 		bool changed = before == null ? civs.Count > 0 : !before.SetEquals(civs);
@@ -281,8 +319,29 @@ internal static class LobbyState {
 			MemberKeys[LocalSteamId] = LobbyRuleRegistry.ParseKeys(LobbyRuleRegistry.DescribeMods()) ?? new HashSet<string>();
 			var civKeys = new List<string>();
 			foreach (var c in CivilizationRegistry.All) civKeys.Add(CivTag(c));
-			_lobby.Value.SetMemberData(CivsKey, "v2" + string.Join(",", civKeys));
+			_lobby.Value.SetMemberData(CivsKey, "v3" + string.Join(",", civKeys));
+			PublishCivilizationTable();
 		}
 		catch (Exception e) { CoreLog.Once("lobby:publish", "lobby: could not publish the rule keys: " + e.Message); }
+	}
+
+	/// <summary>
+	/// Host, before the match: the lobby's civilization table plus this computer's missing civilizations (<see cref="CivilizationTable.Build"/>).
+	/// Existing numbers are kept, so a new host after the old one left does not move anybody's numbers.
+	/// </summary>
+	private static void PublishCivilizationTable() {
+		if (!_lobby.HasValue || !IsHost || RulesFrozen || CivilizationRegistry.All.Count == 0) return;
+		try {
+			string existing = _lobby.Value.GetData(CivilizationTable.Key);
+			string table = CivilizationTable.Build(existing);
+			if (table != existing) _lobby.Value.SetData(CivilizationTable.Key, table);
+			CivilizationTable.Read(table);
+		}
+		catch (Exception e) { CoreLog.Once("lobby:civtable", "lobby: could not publish the civilization table: " + e.Message); }
+	}
+
+	private static void ReadCivilizationTable(SteamLobby lobby) {
+		try { CivilizationTable.Read(lobby.GetData(CivilizationTable.Key)); }
+		catch (Exception e) { CoreLog.Once("lobby:civtable:read", "lobby: could not read the civilization table: " + e.Message); }
 	}
 }

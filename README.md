@@ -136,7 +136,7 @@ Rules to follow:
 ### Compatibility check
 
 Every client publishes its rule keys and mod versions in its Steam member data (`modcore.mods`). When the host has set a rule away from its default and some member does not have the mod,
-`Core.Lobby.Compatibility.Warnings` contains a line such as `"Alice does not have Meteors, this rule may desync."`. `Core.Lobby.Compatibility.IsCompatible` is `Warnings.Count == 0`.
+`Core.Lobby.Compatibility.Warnings` contains a line such as `"Alice does not have Meteors, this rule will be off for everyone in the match."`. `Core.Lobby.Compatibility.IsCompatible` is `Warnings.Count == 0`.
 Screens (ModBridge) show these lines; your mod can also block a start button or log them.
 
 ## Match
@@ -359,6 +359,16 @@ rule.InGroup(Core.Lobby.Groups.Get("author.events", "Events"));    // or your ow
 
 `Core.Lobby.Groups.All` (sorted) and `Changed` let a lobby screen show collapsible headings instead of one long list.
 
+## Game fixes
+
+ModCore fixes two places where the game itself fails on big islands. Both are always on and give exactly the game's results, so they are safe with
+players who do not have ModCore:
+
+| What | Game code | Fix |
+|---|---|---|
+| Island generation closes the game on grids above 119 tiles (stack overflow, nothing in the log) | `IslandGeneration.GenerateJob`'s sea-level fill `Allow` calls itself once per sea tile, on a job thread with a 1 MB stack | `Combat/SeaLevelFill.cs`: the Burst copies of the function (AVX2 and SSE2) jump to an iterative version. Found by byte signature; if a game update changes the code, ModCore logs a warning and leaves it alone. |
+| Combat on a very big island can close the game the same way | `CombatPhase.ComputeConnectedComponents`' `Visit` calls itself once per walkable tile | `Combat/WalkableRegions.cs`: the same labels without recursion |
+
 ## Documentation
 
 Every feature with examples: the *Modding Libraries* section of the [DiceModders wiki](https://dicemodders.github.io/DiceKingdoms-Modding-Wiki/).
@@ -369,7 +379,7 @@ Small helpers almost every mod needs, in the namespace `DiceModders.ModCore.Tool
 
 | Type | What it does |
 |---|---|
-| `Patcher` | `new Patcher("my.mod", Log)`, then `Patch("GameState", "ChangeTurnPhase", typeof(MyPatches), postfix: "AfterPhase")` (private methods too; or pass a `Type`). Logs `[patch] OK` / `[patch] FAIL` with a hint when a type or method was renamed in a game update, and never throws. `Summary()` logs the count; `Harmony` gives the instance for anything else. |
+| `Patcher` | `new Patcher("my.mod", Log)`, then `Patch("GameState", "ChangeTurnPhase", typeof(MyPatches), postfix: "AfterPhase")` (private methods too; or pass a `Type`). Logs `[patch] OK` / `[patch] FAIL` with a hint when a type or method was renamed in a game update, and never throws. `Summary()` logs the count; `Harmony` gives the instance for anything else. `Switch(...)` prepares a patch that is applied only while its `PatchSwitch.On` is true: for methods the game calls every frame or every tile, switched on events, so the game method runs untouched while it is off. |
 | `GameTypes` | `Find("IslandGrid")` finds a game type by simple or full name in `BepInEx\interop`; `Suggest` / `SuggestMethods` list similar names. |
 | `Reflect` | `Call(obj, "Method", args)`, `TryGetMember`, `TrySetMember`, `CallStatic`, `Wrap(type, pointer)`: name-based access to interop objects, private members included. A plain `int` is accepted for enum parameters. |
 | `Mem` | Raw reads/writes at a field offset (`ReadInt`, `WriteInt`, `ReadPtr`, `Str`, `ArrayLength`, `ArrayElem`). Offsets change with every game build; use only for members the interop does not expose, never for encrypted values (resource storage). |
@@ -420,6 +430,7 @@ The interop folder exists after the first game start with BepInEx 6 installed (i
 | `Civilizations/IslandColours.cs` | Per-civilization island ground / nature colours (MaterialPropertyBlock palette copies, island events). |
 | `Match/MatchApi.cs`, `MatchState.cs`, `MatchSettings.cs` | The public match API (`ModCore.Match`, `MatchPhase`, `MatchSettings`) and the listeners on the game's `GameState` events. |
 | `Players/PlayersApi.cs` | `ModCore.Players` and `MatchPlayer`. |
+| `Combat/WalkableRegions.cs`, `Combat/SeaLevelFill.cs` | The game fixes for big islands (see "Game fixes"). |
 | `Tools/` | Public helpers `Patcher`, `GameTypes`, `Reflect`, `Mem`, `Meshes`, `Sprites`, `Prefabs`, `TextSprites`, and the console `ConsoleGuard`. |
 | `docs/NOTES.md` | How it works inside and why (read before changing the hooks). |
 | `docs/EXAMPLE_MOD.md` | A complete minimal mod. |

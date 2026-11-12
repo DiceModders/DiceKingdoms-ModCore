@@ -82,6 +82,37 @@ public sealed class Patcher {
 		}
 	}
 
+	/// <summary>
+	/// A patch that is only in the game while it is switched on: <c>var s = patcher.Switch(typeof(IslandGrid), "CanPlaceBuilding", typeof(MyPatches),
+	/// postfix: "After"); s.On = option.Value;</c>. Use it for methods the game calls very often (placement checks, AI scoring, every tile): a
+	/// Harmony patch costs a trip from the game into C# and back on EVERY call, even when its body returns at once. Switch it from the event that
+	/// changes the condition (a setting changed, the match started), never every frame. Starts off; the method is looked up now and logged like
+	/// <see cref="Patch(Type, string, Type, string, string)"/>.
+	/// </summary>
+	public PatchSwitch Switch(Type type, string method, Type host, string prefix = null, string postfix = null) {
+		string label = (type?.Name ?? "?") + "." + method;
+		try {
+			MethodBase target = type == null ? null : AccessTools.Method(type, method);
+			if (target == null) { Fail(label, "method not found"); return new PatchSwitch(null, null, null, null, label, _log); }
+			var pre = prefix == null ? null : AccessTools.Method(host, prefix);
+			var post = postfix == null ? null : AccessTools.Method(host, postfix);
+			if ((prefix != null && pre == null) || (postfix != null && post == null)) {
+				Fail(label, "patch method missing in " + host?.Name);
+				return new PatchSwitch(null, null, null, null, label, _log);
+			}
+			_log?.LogInfo("[patch] ready " + label + " (switched on when needed)");
+			return new PatchSwitch(_harmony, target, pre, post, label, _log);
+		}
+		catch (Exception e) {
+			Fail(label, e.GetType().Name + ": " + e.Message);
+			return new PatchSwitch(null, null, null, null, label, _log);
+		}
+	}
+
+	/// <summary>Same as the Type overload, with the game type looked up by name.</summary>
+	public PatchSwitch Switch(string typeName, string method, Type host, string prefix = null, string postfix = null) =>
+		Switch(GameTypes.Find(typeName), method, host, prefix, postfix);
+
 	private bool Fail(string label, string why) {
 		Failed++;
 		_log?.LogWarning("[patch] FAIL " + label + " - " + why);

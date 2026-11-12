@@ -43,6 +43,28 @@ public static class Sprites {
 	}
 
 	/// <summary>
+	/// A readable RGBA32 copy of a sprite's pixels, made on the GPU (works for compressed and GPU-only textures, e.g. pictures from
+	/// <see cref="IconRenderer"/> or the <see cref="TextureCache"/>). For <see cref="TextSprites"/> entries.
+	/// </summary>
+	public static Texture2D ReadableCopy(Sprite sprite) {
+		if (sprite == null) throw new ArgumentNullException(nameof(sprite));
+		var src = sprite.texture;
+		var r = sprite.textureRect;
+		int w = Mathf.RoundToInt(r.width), h = Mathf.RoundToInt(r.height);
+		var rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+		var previous = RenderTexture.active;
+		try {
+			Graphics.Blit(src, rt, new Vector2(r.width / src.width, r.height / src.height), new Vector2(r.x / src.width, r.y / src.height));
+			RenderTexture.active = rt;
+			var copy = new Texture2D(w, h, TextureFormat.RGBA32, false) { name = sprite.name, hideFlags = HideFlags.DontUnloadUnusedAsset };
+			copy.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
+			copy.Apply(false, false);
+			return copy;
+		}
+		finally { RenderTexture.active = previous; RenderTexture.ReleaseTemporary(rt); }
+	}
+
+	/// <summary>
 	/// Loads one sprite per player colour from <paramref name="folder"/>: <c>00.png</c> ... <c>11.png</c>, in the game's colour order
 	/// (0 Red, 1 Pink, 2 Orange, 3 Green, 4 Carribean, 5 Cyan, 6 Yellow, 7 Ivory, 8 Brown, 9 Blue, 10 Grey, 11 Purple).
 	/// </summary>

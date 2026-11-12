@@ -26,15 +26,15 @@ public sealed class IconView {
 	/// <summary>The angle of the game's own building pictures (fitted against them: pitch 22, yaw 45).</summary>
 	public static IconView Building => new();
 	/// <summary>Units seen almost from the front, all at one scale.</summary>
-	public static IconView Unit => new() { Pitch = 8f, Yaw = 200f, OrthoSize = 0.62f };
+	public static IconView Unit => new() { Pitch = 8f, Yaw = 200f, OrthoSize = 0.34f, Ground = 0.035f };
 
 	internal string Key => FormattableString.Invariant($"{Pitch}/{Yaw}/{Padding}/{OrthoSize}/{Ground}");
 }
 
 /// <summary>
 /// Takes pictures of models inside the game, so a civilization does not need pictures made outside the game: one picture per player colour, with a transparent
-/// background and soft edges. The game paints a model in a player's colour with <c>ColoredPaperUtils.SlowSetPlayerColor</c>, which is used here as well, so
-/// the pictures match what players see in the match.
+/// background and soft edges. Each part is painted in the player's colour the game's way (<c>ColoredPaperOverrides.SetColorPalette</c> with the
+/// colour's palette), so the pictures match what players see in the match.
 /// <para>Rendering is spread over frames (one player colour per frame) after the game data has loaded, and the result is kept in the
 /// <see cref="TextureCache"/>: it is rendered once, later launches read one file. The cache is renewed when the model, the view, the size or the game's version changes.</para>
 /// </summary>
@@ -73,6 +73,7 @@ public static class IconRenderer {
 		job.Colours = 12;
 		job.PageW = job.CellW * 4; job.PageH = job.CellH * 3;
 		job.Key = KeyOf(job);
+		Keys[name] = job.Key;
 
 		var cached = TextureCache.Load("icons " + name, job.Key);
 		if (cached != null && cached.Length == 1) { Finish(job, cached[0]); return; }
@@ -80,6 +81,13 @@ public static class IconRenderer {
 		Jobs.Enqueue(job);
 		ModCore.Civilizations.WhenGameDataLoaded(Wake);
 	}
+
+	/// <summary>
+	/// The cache key of pictures asked for with <see cref="PlayerColours"/> (it changes when the model, view, size or game version changes), e.g. to key a
+	/// <see cref="TextSprites"/> sheet made from them. Null for a name that was not asked for.
+	/// </summary>
+	public static string CacheKey(string name) => Keys.TryGetValue(name, out var k) ? k : null;
+	private static readonly Dictionary<string, string> Keys = new();
 
 	/// <summary>Starts reading cached pictures in the background (call early, e.g. in your plugin's Load).</summary>
 	public static void Prefetch(params string[] names) { foreach (var n in names) TextureCache.Prefetch("icons " + n); }
@@ -141,13 +149,14 @@ public static class IconRenderer {
 		job.Instance = inst;
 		job.Page = new byte[job.PageW * job.PageH * 4];
 		Frame(job);
-		if (job.View.OrthoSize == null) Refit(job);
+		Refit(job);
 		return true;
 	}
 
 	private static void Frame(Job job) {
 		var rot = Quaternion.Euler(job.View.Pitch, job.View.Yaw, 0f);
 		_camera.transform.rotation = rot;
+		_light.transform.rotation = Quaternion.Euler(job.View.Pitch + 35f, job.View.Yaw - 35f, 0f);   // from the camera's upper left: faces and fronts lit
 		var bounds = BoundsOf(job.Instance);
 		Vector3 right = rot * Vector3.right, up = rot * Vector3.up, fwd = rot * Vector3.forward;
 		// the model's extent on the picture plane
@@ -191,9 +200,15 @@ public static class IconRenderer {
 			}
 		if (x1 < 0) { CoreLog.Warn("icon renderer: '" + job.Name + "' is not visible from this view"); return; }
 		float half = _camera.orthographicSize, unit = 2f * half / h;   // world size of one pixel
-		float cx = ((x0 + x1 + 1) / 2f - w / 2f) * unit, cy = ((y0 + y1 + 1) / 2f - h / 2f) * unit;
-		float needH = (y1 - y0 + 1) * unit / 2f, needW = (x1 - x0 + 1) * unit / 2f / _camera.aspect;
 		var t = _camera.transform;
+		float cx = ((x0 + x1 + 1) / 2f - w / 2f) * unit;
+		if (job.View.OrthoSize != null) {
+			// fixed scale (units): centred across, the lowest drawn pixel (the feet; skinned meshes report loose bounds) on the ground line
+			t.position += t.right * cx + t.up * ((y0 - job.View.Ground * h) * unit);
+			return;
+		}
+		float cy = ((y0 + y1 + 1) / 2f - h / 2f) * unit;
+		float needH = (y1 - y0 + 1) * unit / 2f, needW = (x1 - x0 + 1) * unit / 2f / _camera.aspect;
 		t.position += t.right * cx + t.up * cy;
 		_camera.orthographicSize = Math.Max(needH, needW) / Math.Max(0.05f, 1f - 2f * job.View.Padding);
 	}
@@ -328,6 +343,7 @@ public static class IconRenderer {
 	}
 
 	private static void Finish(Job job, Texture2D page) {
+		page.mipMapBias = -0.5f;   // the game draws pictures smaller than they are: a sharper level keeps the edges soft but the details crisp
 		var sprites = new Sprite[job.Colours];
 		for (int i = 0; i < job.Colours; i++) {
 			var rect = new Rect((i % 4) * job.CellW + (job.CellW - job.Width) / 2, (2 - i / 4) * job.CellH + (job.CellH - job.Height) / 2, job.Width, job.Height);

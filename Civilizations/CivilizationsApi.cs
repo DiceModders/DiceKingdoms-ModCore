@@ -56,12 +56,19 @@ internal static class CivilizationRegistry {
 		Items.Add(civ);
 		CivilizationText.Set(id, new CivilizationName(name));
 		LobbyGroupRegistry.ForCivilization(id);   // its heading in the lobby rules list
-		LobbyState.PublishMods();   // the others learn that this client knows the civilization
+		LobbyState.PublishMods();   // the others learn that this client knows the civilization (the host also adds it to the lobby's table)
 		ModCore.Civilizations.RaiseAdded(civ);
 		return civ;
 	}
 
-	public static void Remove(ModCivilization civ) { if (Items.Remove(civ)) { CivilizationText.Set(civ.Id, null); CivilizationText.RemoveTexts(civ.Id); LobbyState.PublishMods(); ModCore.Civilizations.RaiseRemoved(civ); } }
+	public static void Remove(ModCivilization civ) {
+		if (!Items.Remove(civ)) return;
+		CivilizationText.Set(civ.Id, null);
+		CivilizationText.RemoveTexts(civ.Id);
+		LobbyState.PublishMods();   // the others learn this client no longer has it; the table keeps its number (numbers never move)
+		CivilizationGuard.Run();    // host: players standing on it move to the civilization it looks like
+		ModCore.Civilizations.RaiseRemoved(civ);
+	}
 
 	// models/colours a mod gave a BUILT-IN civilization (0..4); null slot = untouched
 	internal static readonly CivilizationSkins[] BuiltInSkins = new CivilizationSkins[5];
@@ -102,6 +109,17 @@ public static partial class ModCore {
 	/// </summary>
 	public static partial class Civilizations {
 		public static IReadOnlyList<ModCivilization> All { get { Core.Ensure(); return CivilizationRegistry.All; } }
+
+		/// <summary>
+		/// A civilization number to put into data other players read (a lobby value, a message): this computer's number of a mod civilization can differ
+		/// from another computer's, so it is turned into the lobby host's number. Built-in civilizations (0..4) and games without a lobby are unchanged.
+		/// Read such a number back with <see cref="FromLobbyNumber"/>. -1 when the host's table does not list this civilization (nobody else can know it).
+		/// The player skins the game sends are translated by ModCore itself.
+		/// </summary>
+		public static int ToLobbyNumber(int civilization) { Core.Ensure(); return CivilizationTable.Number(civilization); }
+
+		/// <summary>A civilization number written by another player with <see cref="ToLobbyNumber"/> -> this computer's number; -1 when this computer does not have that civilization.</summary>
+		public static int FromLobbyNumber(int civilization) { Core.Ensure(); return CivilizationTable.Lookup(civilization); }
 
 		public static event Action<ModCivilization> Added;
 		public static event Action<ModCivilization> Removed;
