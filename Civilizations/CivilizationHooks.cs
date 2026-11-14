@@ -85,7 +85,10 @@ internal static class NextCivilizationHook {
 			if (mods.Count < all.Count)
 				CoreLog.Once("civ:missing:" + mods.Count + "/" + all.Count, $"civilization cycle: {all.Count - mods.Count} mod civilization(s) skipped, a lobby member does not have them " +
 				                                                             "in the same version: " + string.Join(", ", all.FindAll(c => !mods.Contains(c)).ConvertAll(c => c.Name)));
-			if (IsReady(__instance)) return true;                  // the game itself ignores clicks once the player is ready
+			// The game's NextCivilization only refuses once the match has started; it does NOT look at the ready flag. Clients are always
+			// "ready" on the host, so a ready test here kept every client from reaching the mod civilizations.
+			var gs = __instance.GameState;
+			if (gs != null && gs.GameStarted) return true;
 			var current = __instance.Skins;
 			if (current == null) return true;
 			int previous = (int)current.civilization;

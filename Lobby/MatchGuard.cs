@@ -13,7 +13,7 @@ namespace DiceModders.ModCore;
 /// during a match only when a Player with that <c>InitialOwnerId</c> exists; then it calls <c>Approve</c> (-> MLAPI's callback -> 
 /// <c>NetworkingManager.HandleApproval</c>) and <c>OnRejoin(player)</c>, which gives the player and island objects back to that client and sends the
 /// match state. The guard hands the lambda client id 0 for a refused player, so the game itself takes its "no such player" branch: Approve(false),
-/// no OnRejoin, and MLAPI disconnects the client (the callback keeps the real id). HandleApproval is checked too, in case the first step did not apply.
+/// no OnRejoin, and MLAPI disconnects the client (the callback keeps the real id).
 /// The transport's client id is the Steam id.
 /// </summary>
 internal static class MatchGuard {
@@ -25,7 +25,8 @@ internal static class MatchGuard {
 		try {
 			var harmony = new Harmony("DiceModders.ModCore.guard");
 			harmony.PatchAll(typeof(GameApprovalPatch));
-			harmony.PatchAll(typeof(NetworkApprovalPatch));
+			// NOT NetworkingManager.HandleApproval: it takes Nullable<ulong/Vector3/Quaternion> arguments, and a Harmony patch on it broke every
+			// approval through the interop (the host disconnected each joining player with App_Min, then OnJoin threw KeyNotFoundException).
 		}
 		catch (Exception e) { CoreLog.Error("match guard failed: " + e); }
 	}
@@ -67,18 +68,4 @@ internal static class MatchGuard {
 		}
 	}
 
-	[HarmonyPatch(typeof(NetworkingManager), "HandleApproval")]
-	private static class NetworkApprovalPatch {
-		[HarmonyPrefix]
-		public static void Prefix(ulong __0, ref bool __3) {
-			try {
-				if (!__3) return;
-				var missing = Missing(__0);
-				if (missing == null) return;
-				__3 = false;
-				Report(__0, missing);
-			}
-			catch (Exception e) { CoreLog.Once("guard:network", "match guard: " + e); }
-		}
-	}
 }
