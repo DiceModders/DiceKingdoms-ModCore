@@ -26,6 +26,11 @@
     </Reference>
   </ItemGroup>
 
+  <!-- ModCore's own texts (see Texts\TextsApi.cs); DiceModders.ModCore.texts.json next to the DLL wins line by line -->
+  <ItemGroup>
+    <EmbeddedResource Include="texts.json" LogicalName="texts.json" />
+  </ItemGroup>
+
   <!-- reproducible: the same code gives the same DLL on every computer (ModCore compares DLL fingerprints in the lobby) -->
   <PropertyGroup>
     <Deterministic>true</Deterministic>

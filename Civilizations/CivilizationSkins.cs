@@ -24,6 +24,13 @@ public sealed class CivilizationSkins {
 	internal readonly Dictionary<int, GameNatureVisualHub> NatureTiles = new();
 	internal GameShipVisual ShipPrefab;
 
+	/// <summary>
+	/// Switches these skins on or off at any time (for example from a config setting): while off, the game gets its own models and island colours again.
+	/// Visual and local. It takes effect for everything the game creates after the switch (new buildings, units, ships, islands, the lobby castle);
+	/// call <see cref="ModCore.Civilizations.RefreshLooks()"/> afterwards to rebuild the buildings already standing.
+	/// </summary>
+	public bool Enabled { get; set; } = true;
+
 	/// <summary>The building model for a building type (CASTLE is the castle on the match-start screen).</summary>
 	public CivilizationSkins Building(GameBuildingTypeName type, GameBuildingVisual prefab) { Buildings[(int)type] = prefab; return this; }
 	/// <summary>The model for a unit type, by its number in the game's <c>Unit.Type</c>: 0 ARCHER, 1 BOURGEOIS, 2 GENERAL, 3 KING, 4 PEASANT, 5 PRIEST, 6 SOLDIER, 7 SORCERER, 8 TEMPLAR, 9 WARLOCK.</summary>
@@ -33,8 +40,14 @@ public sealed class CivilizationSkins {
 	/// <summary>The ship model.</summary>
 	public CivilizationSkins Ship(GameShipVisual prefab) { ShipPrefab = prefab; return this; }
 
-	internal readonly List<(int x, int y, Color c)> GroundCells = new(), NatureCells = new();
-	internal bool HasIslandColours => GroundCells.Count > 0 || NatureCells.Count > 0;
+	internal readonly List<(int x, int y, Color c)> GroundCells = new(), NatureCells = new(), HillCells = new();
+	internal bool HasIslandColours => GroundCells.Count > 0 || NatureCells.Count > 0 || HillCells.Count > 0;
+	/// <summary>The cells for the mountains: the nature colours, then the hill colours over them.</summary>
+	internal List<(int x, int y, Color c)> HillsAndNature() {
+		var all = new List<(int x, int y, Color c)>(NatureCells);
+		foreach (var h in HillCells) { all.RemoveAll(c => c.x == h.x && c.y == h.y); all.Add(h); }
+		return all;
+	}
 
 	/// <summary>
 	/// Recolours a cell of the game's 8x8 colour palette (x from the left, y from the bottom) on this civilization's island ground: for example the
@@ -44,6 +57,9 @@ public sealed class CivilizationSkins {
 	public CivilizationSkins GroundColour(int x, int y, Color colour) { GroundCells.RemoveAll(c => c.x == x && c.y == y); GroundCells.Add((x, y, colour)); return this; }
 	/// <summary>The same for the mountains (inner cliffs), trees and flowers on this civilization's islands (snow models: (2,2) snow, (0,2) cliff body).</summary>
 	public CivilizationSkins NatureColour(int x, int y, Color colour) { NatureCells.RemoveAll(c => c.x == x && c.y == y); NatureCells.Add((x, y, colour)); return this; }
+	/// <summary>A cell for the mountains (inner cliffs) only, over <see cref="NatureColour"/>: the plains hills share their top cell (1,0) with the
+	/// trees, so a hill-top colour set here leaves the trees as they are.</summary>
+	public CivilizationSkins HillColour(int x, int y, Color colour) { HillCells.RemoveAll(c => c.x == x && c.y == y); HillCells.Add((x, y, colour)); return this; }
 
 	internal sealed class ModelEntry {
 		public Mesh Mesh;
@@ -172,13 +188,13 @@ internal static class CivilizationSkinHooks {
 			var civ = CivilizationRegistry.Find(real);
 			if (civ == null) return false;
 			result = civ.Skins; name = civ.Name; look = civ.SkinsLike;
-			return true;
+			return result.Enabled;
 		}
 		if (skins == null) return false;
 		int id = (int)skins.civilization;
 		if (id < 0 || id >= CivilizationRegistry.BuiltInSkins.Length || CivilizationRegistry.BuiltInSkins[id] == null) return false;
 		result = CivilizationRegistry.BuiltInSkins[id]; name = ((DiceKingdoms.Interface.Civilization)id).ToString(); look = id;
-		return true;
+		return result.Enabled;
 	}
 
 	public static void BuildingPostfix(GamePlayerSkins __instance, GameBuildingType buildingType, ref GameBuildingVisual __result) {

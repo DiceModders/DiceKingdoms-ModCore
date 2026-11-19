@@ -335,6 +335,61 @@ Tools.TextSprites.AddLike("My Civ Text", entries, atlas.Key);             // the
 PNG and it is rebuilt on the next launch. Deleting the folder is always safe. Use `TextSprites.Entry(name, likeName, () => load())` so pictures are
 only decoded when the sheet has to be redrawn.
 
+## Texts and translations
+
+`ModCore.Texts` gives a mod its texts in the game's languages: one system for mod screens, civilization texts and texts the game itself left untranslated. Nothing is polled and nothing is added to the game's tables.
+
+**1. Write the texts** in one JSON file, every key once with one entry per language:
+
+```json
+{
+  "settings.title": { "en": "My mod", "ru": "Мой мод" },
+  "settings.found": { "en": "{0} {0:island|islands} found", "ru": "{0:Найден|Найдено|Найдено} {0} {0:остров|острова|островов}" }
+}
+```
+
+**2. Build the file into the DLL** (`.csproj`):
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="texts.json" LogicalName="texts.json" />
+</ItemGroup>
+```
+
+**3. Use it:**
+
+```csharp
+static readonly TextSet T = Core.Texts.Load();          // once, e.g. in Load()
+label.text = T.Get("settings.title");                    // the game's current language
+label.text = T.Get("settings.found", count);             // values as in string.Format
+Core.Texts.LanguageChanged += Redraw;                    // the game's own language-change event
+```
+
+* **Languages**: any number. The codes are the game's: `en`, `de`, `fr`, `ru`, `uk`, `zh-CN`.
+* **Fallback**: the exact language (`zh-CN`), then its base (`zh`), then English, then the key itself, so a missing text is visible instead of blank. English is needed for every key; `Load` logs keys without it.
+* **Loose file**: a file named `<DllName>.texts.json` next to the DLL (for example `MyMod.texts.json`) wins over the built-in texts line by line. Players can fix a text or add a language without rebuilding; the mod passes no path.
+* **Number words**: `{0:tile|tiles}` picks the word by value 0: one | many in English, German and French; `{0:клетка|клетки|клеток}` (1 | 2-4 | 5+) in Russian and Ukrainian.
+
+### Civilization texts
+
+`Core.Civilizations.SetTexts(civ.Id, texts)` gives a civilization its texts from the same kind of set: the key `civilization.name` is its name, every other key is a game text key (`unit.SOLDIER.name`, `technology.TEMPLARS.description`, ...), shown while the viewer's civilization is that one. `Load("civ.json", "texts")` reads the texts from the object `texts` inside a bigger built-in file.
+
+### The game's own untranslated texts
+
+Two key prefixes translate texts of the game itself, for every player and civilization, in the languages the file has (other languages keep the game's text):
+
+```json
+{
+  "game:{0} tiles": { "ru": "{0} {0:клетка|клетки|клеток}" },
+  "gamekey:unit.rules.range": { "uk": "Дальність: {a.0}" }
+}
+```
+
+* `game:<text>` is a text written in the game's code (the key is the English text as the game writes it, with its `{0}` slots). Such a text is translated when the game builds it, so one built before a language change keeps its language until its screen is opened again.
+* `gamekey:<key>` is one of the game's localization keys.
+
+ModCore's own `texts.json` already translates the unit and building range ("3 tiles").
+
 ## Mod on/off switch
 
 ```csharp

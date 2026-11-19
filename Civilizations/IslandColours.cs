@@ -37,7 +37,7 @@ internal static class IslandColours {
 			if (skins == null) return null;
 			int id = (int)skins.civilization;
 			var s = CivilizationRegistry.SkinsOf(id);
-			return s != null && s.HasIslandColours ? (id, s) : null;
+			return s != null && s.Enabled && s.HasIslandColours ? (id, s) : null;
 		}
 		catch { return null; }
 	}
@@ -51,8 +51,18 @@ internal static class IslandColours {
 				if (CivOf(grid) is not { } civ) continue;
 				var gf = grid.groundMeshFilter;
 				if (gf != null) Recolour(civ, gf.GetComponent<MeshRenderer>(), civ.Skins.GroundCells, "g");
+				var hills = new HashSet<IntPtr>();   // mountains get the hill cells, everything else the nature cells
+				var cliffs = grid.innerCliffVisuals;
+				if (cliffs != null)
+					for (int i = 0; i < cliffs.Count; i++) {
+						var t = cliffs[i];
+						if (t == null) continue;
+						foreach (var r in t.GetComponentsInChildren<MeshRenderer>(true)) { hills.Add(r.Pointer); Recolour(civ, r, civ.Skins.HillsAndNature(), "h"); }
+					}
 				var parent = grid.natureParent;
-				if (parent != null) foreach (var r in parent.GetComponentsInChildren<MeshRenderer>(true)) Recolour(civ, r, civ.Skins.NatureCells, "n");
+				if (parent != null)
+					foreach (var r in parent.GetComponentsInChildren<MeshRenderer>(true))
+						if (!hills.Contains(r.Pointer)) Recolour(civ, r, civ.Skins.NatureCells, "n");
 			}
 		}
 		catch (Exception e) { CoreLog.Once("island:all", "island colours: " + e.Message); }
@@ -64,7 +74,7 @@ internal static class IslandColours {
 			var list = __instance.innerCliffVisuals;
 			if (list == null || list.Count == 0) return;
 			var t = list[list.Count - 1];   // AddInnerCliff appends the new visual
-			if (t != null) foreach (var r in t.GetComponentsInChildren<MeshRenderer>(true)) Recolour(civ, r, civ.Skins.NatureCells, "n");
+			if (t != null) foreach (var r in t.GetComponentsInChildren<MeshRenderer>(true)) Recolour(civ, r, civ.Skins.HillsAndNature(), "h");
 		}
 		catch (Exception e) { CoreLog.Once("island:cliff", "island colours (mountain): " + e.Message); }
 	}

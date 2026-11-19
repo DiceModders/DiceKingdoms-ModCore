@@ -13,6 +13,8 @@ public sealed class ModCivilization {
 	/// <summary>The value used as <c>Civilization</c> (the game's enum has 0..4; mod civilizations get 5..127, the range the game can send over the network).</summary>
 	public int Id { get; }
 	public string Name { get; }
+	/// <summary>The name to show: in the game's current language when the mod gave translations (Rename / SetTexts), otherwise <see cref="Name"/>.</summary>
+	public string DisplayName => CivilizationText.NameFor(Id, Name);
 	internal Func<GameTechTree> TechTree { get; }
 	/// <summary>The built-in civilization whose biome and visuals this one borrows (the game only knows how to skin 0..4).</summary>
 	public int SkinsLike { get; }
@@ -141,6 +143,7 @@ public static partial class ModCore {
 		}
 
 		internal static void RaiseGameDataLoaded() {
+			TextLanguage.Listen();   // the game's language settings exist from here on
 			var handler = GameDataLoaded;
 			if (handler != null) {
 				foreach (Action d in handler.GetInvocationList()) {
@@ -202,6 +205,20 @@ public static partial class ModCore {
 		public static void SetText(int civilization, string key, string text, IReadOnlyDictionary<string, string> byLanguage = null) {
 			Core.Ensure();
 			CivilizationText.SetText(civilization, key, text != null ? new CivilizationName(text, byLanguage) : null);
+		}
+
+		/// <summary>
+		/// Every text of a civilization from one <see cref="TextSet"/> (<see cref="Texts.Load"/>): the key <c>civilization.name</c> is its name, every other
+		/// key is a game text key as in <see cref="SetText"/> (<c>unit.SOLDIER.name</c>, <c>technology.TEMPLARS.description</c>, ...). A language the set
+		/// lacks shows the English text. Calling again replaces the set given before; <c>null</c> removes it.
+		/// </summary>
+		public static void SetTexts(int civilization, TextSet texts) {
+			Core.Ensure();
+			CivilizationText.SetTexts(civilization, texts);
+			if (texts == null || !texts.Has(CivilizationText.NameKey)) {   // back to the name it was added with
+				var civ = CivilizationRegistry.Find(civilization);
+				if (civ != null) CivilizationText.Set(civilization, new CivilizationName(civ.Name));
+			}
 		}
 
 		/// <summary>A unit's name for a civilization (<c>unit.TYPE.name</c>); <paramref name="unit"/> is the game's unit type, e.g. <c>Unit.Type.SOLDIER</c>.</summary>

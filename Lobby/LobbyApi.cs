@@ -57,7 +57,7 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 
 	internal LobbyRule(LobbyMod mod, string key, string title, T defaultValue, string description, Func<bool> visible, bool affectsSimulation,
 		Func<T, string> write, Func<string, (bool ok, T value)> read) {
-		Mod = mod; Key = key; Title = title; Default = defaultValue; Description = description; AffectsSimulation = affectsSimulation;
+		Mod = mod; Key = key; _title = title; Default = defaultValue; _description = description; AffectsSimulation = affectsSimulation;
 		_visible = visible; _write = write; _read = read;
 		_reported = defaultValue;
 		if (affectsSimulation) LobbyMods.MarkSimulation(mod);   // its DLL fingerprint is compared in the lobby
@@ -65,9 +65,13 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 
 	/// <summary>The id the rule was registered with, unique per mod (prefix it with your mod name).</summary>
 	public string Key { get; }
-	public string Title { get; }
+	private readonly string _title, _description;
+	private IReadOnlyList<string> _choices;
+	/// <summary>The title in the game's language: the mod's texts file key <c>rule.&lt;Key&gt;.title</c>, else the English given in code. Asked at draw time.</summary>
+	public string Title => ModCore.Texts.Lookup(Mod?.AssemblyName, "rule." + Key + ".title", _title);
 	public T Default { get; }
-	public string Description { get; }
+	/// <summary>The description in the game's language (<c>rule.&lt;Key&gt;.description</c>), else the English given in code.</summary>
+	public string Description => _description == null ? null : ModCore.Texts.Lookup(Mod?.AssemblyName, "rule." + Key + ".description", _description);
 	public bool AffectsSimulation { get; }
 	public string ModId => Mod.Id;
 	public string ModName => Mod.Name;
@@ -78,7 +82,15 @@ public sealed class LobbyRule<T> : ILobbyRuleInternal {
 	public int Max { get; internal set; }
 	public int Step { get; internal set; } = 1;
 	/// <summary>For a rule made with <c>Rules.Choice</c>: the names of the values 0, 1, 2 ... (screens show a drop-down); null for a plain number.</summary>
-	public IReadOnlyList<string> Choices { get; internal set; }
+	public IReadOnlyList<string> Choices {
+		get {
+			if (_choices == null) return null;
+			var list = new List<string>(_choices.Count);
+			for (int i = 0; i < _choices.Count; i++) list.Add(ModCore.Texts.Lookup(Mod?.AssemblyName, "rule." + Key + ".choice." + i, _choices[i]));   // rule.<key>.choice.<n>
+			return list;
+		}
+		internal set => _choices = value;
+	}
 
 	/// <summary>
 	/// The value to simulate with. Outside a lobby it is <see cref="Default"/>; in the lobby it is the host's current value; from the moment the match

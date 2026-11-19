@@ -19,12 +19,14 @@ public sealed class Hotkey {
 	private InputAction _action;
 
 	internal Hotkey(LobbyMod mod, ConfigEntry<string> entry, string id, string title, string defaultKeys, Func<bool> when) {
-		Mod = mod; _entry = entry; Id = id; Title = title; Default = defaultKeys; When = when;
+		Mod = mod; _entry = entry; Id = id; _title = title; Default = defaultKeys; When = when;
 		_entry.SettingChanged += (_, _) => HotkeyKeys.Later(() => { Bind(); ModCore.Hotkeys.RaiseChanged(this); });   // never inside an input callback
 	}
 
 	public string Id { get; }
-	public string Title { get; }
+	private readonly string _title;
+	/// <summary>The name in the game's language: the mod's texts file key <c>hotkey.&lt;Id&gt;.title</c>, else the English given in code.</summary>
+	public string Title => ModCore.Texts.Lookup(Mod?.AssemblyName, "hotkey." + Id + ".title", _title);
 	/// <summary>The keys, e.g. <c>"F9"</c>, <c>"Ctrl+E"</c>, <c>"Shift+Alt+H"</c>; empty = not bound. Key names are Unity's <c>Key</c> names.</summary>
 	public string Keys => _entry.Value ?? "";
 	public string Default { get; }
@@ -81,9 +83,13 @@ public sealed class Hotkey {
 		if (blocked != null) return;
 		var handler = Pressed;
 		if (handler == null) return;
-		foreach (Action d in handler.GetInvocationList()) {
-			try { d(); } catch (Exception e) { CoreLog.Error("hotkey '" + Title + "' handler failed: " + e); }
-		}
+		// Never run the mod's action inside the input system's own callback: an action that enables or disables input (the game's tools do, e.g. its
+		// pickaxe tool) changes the input state Unity is walking through, and Unity crashes on the next key press. Run it right after the input update.
+		HotkeyKeys.Later(() => {
+			foreach (Action d in handler.GetInvocationList()) {
+				try { d(); } catch (Exception e) { CoreLog.Error("hotkey '" + Title + "' handler failed: " + e); }
+			}
+		});
 	}
 }
 

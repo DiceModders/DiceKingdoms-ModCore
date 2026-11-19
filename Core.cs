@@ -14,6 +14,7 @@ internal static class Core {
 		SeaLevelFill.Install();
 		MatchState.Install();
 		CivilizationHooks.Install();
+		ModCore.Texts.Load(typeof(Core).Assembly);   // ModCore's own: translations of texts the game left in English
 		CoreLog.Info("ModCore ready");
 	}
 }

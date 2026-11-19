@@ -58,5 +58,23 @@ public static partial class ModCore {
 			CoreLog.Info("live looks: " + n + " building model(s) rebuilt");
 			return n;
 		}
+
+		/// <summary>
+		/// An on/off setting for a mod's looks in the mod's own config file (so every mod has its own switch, and ConfigMenu shows it with no extra
+		/// code): sets <see cref="CivilizationSkins.Enabled"/> now and whenever the setting changes, then rebuilds the standing buildings
+		/// (<see cref="RefreshLooks()"/>); units take the new look when they spawn again. Visual and local, nothing is synced.
+		/// Note: reskins of the same built-in civilization share one <see cref="CivilizationSkins"/> (<see cref="Reskin"/>), so they switch together.
+		/// </summary>
+		public static BepInEx.Configuration.ConfigEntry<bool> AddLooksSwitch(BepInEx.Configuration.ConfigFile config, CivilizationSkins skins,
+			string section = "Looks", string key = "Enabled", string description = null) {
+			var entry = config.Bind(section, key, true, description ??
+				"Show this mod's models. Visual and on this PC only; switching works at once, also during a match (standing buildings are rebuilt).");
+			skins.Enabled = entry.Value;
+			entry.SettingChanged += (_, _) => {
+				skins.Enabled = entry.Value;
+				RefreshLooks();
+			};
+			return entry;
+		}
 	}
 }

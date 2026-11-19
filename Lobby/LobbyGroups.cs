@@ -19,10 +19,17 @@ public sealed class LobbyGroup {
 		get {
 			if (Civilization is int c) {
 				var civ = CivilizationRegistry.Find(c);
-				if (civ != null) return civ.Name;
-				if (c >= 0 && c <= 4) return Pretty(((DiceKingdoms.Interface.Civilization)c).ToString());
+				if (civ != null) return civ.DisplayName;
+				if (c >= 0 && c <= 4) {
+					string code = ((DiceKingdoms.Interface.Civilization)c).ToString();
+					// the game's own name in the current language (a civilization mod that took this slot renames it, e.g. Viking -> Japan);
+					// not before the game's texts can be read (reading them while the game loads hangs it): the screens redraw once they can
+					return TextLanguage.Ready ? ModCore.Texts.Game("civilization." + code + ".name", Pretty(code)) : Pretty(code);
+				}
 			}
-			return _title;
+			// a mod's texts file may translate its heading: "group.<key>.title", the key the mod gave (stored here as "mod.<key>")
+			string own = Key.StartsWith("mod.", StringComparison.Ordinal) ? Key.Substring(4) : Key;
+			return ModCore.Texts.LookupAny("group." + own + ".title", _title);
 		}
 	}
 	/// <summary>Sort order of the headings: built-in civilizations 100..104, registered ones 200+, own groups whatever the mod asked for.</summary>

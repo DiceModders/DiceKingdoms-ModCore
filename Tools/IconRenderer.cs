@@ -22,13 +22,16 @@ public sealed class IconView {
 	public float? OrthoSize;
 	/// <summary>With a fixed <see cref="OrthoSize"/>: where the model's feet (its lowest point) stand, as a part of the picture height from the bottom.</summary>
 	public float Ground = 0.04f;
+	/// <summary>Leaves out everything lower than this height below the model's ground (the parts of docks, lighthouses and ships under the water),
+	/// as the game's own pictures do. Null draws everything.</summary>
+	public float? CutBelow;
 
-	/// <summary>The angle of the game's own building pictures (fitted against them: pitch 22, yaw 45).</summary>
-	public static IconView Building => new();
+	/// <summary>The angle of the game's own building pictures (fitted against them: pitch 22, yaw 45); nothing deeper than 0.25 under the ground.</summary>
+	public static IconView Building => new() { CutBelow = 0.25f };
 	/// <summary>Units seen almost from the front, all at one scale.</summary>
 	public static IconView Unit => new() { Pitch = 8f, Yaw = 200f, OrthoSize = 0.34f, Ground = 0.035f };
 
-	internal string Key => FormattableString.Invariant($"{Pitch}/{Yaw}/{Padding}/{OrthoSize}/{Ground}");
+	internal string Key => FormattableString.Invariant($"{Pitch}/{Yaw}/{Padding}/{OrthoSize}/{Ground}/{CutBelow}");
 }
 
 /// <summary>
@@ -39,7 +42,7 @@ public sealed class IconView {
 /// <see cref="TextureCache"/>: it is rendered once, later launches read one file. The cache is renewed when the model, the view, the size or the game's version changes.</para>
 /// </summary>
 public static class IconRenderer {
-	private const int RendererVersion = 1;
+	private const int RendererVersion = 3;   // 3: framing leaves out parts under the water; model size in the cache key
 	private const int Layer = 31;                       // a layer the game does not draw: the camera sees only the model
 	private static readonly Vector3 Stage = new(0f, -5000f, 0f);
 
@@ -96,9 +99,9 @@ public static class IconRenderer {
 		var sb = new StringBuilder();
 		sb.Append(RendererVersion).Append('|').Append(Application.version).Append('|').Append(job.View.Key).Append('|').Append(job.Width).Append('x').Append(job.Height);
 		foreach (var mf in job.Prefab.GetComponentsInChildren<MeshFilter>(true))
-			sb.Append('|').Append(mf.gameObject.name).Append(':').Append(mf.sharedMesh != null ? mf.sharedMesh.name + "/" + mf.sharedMesh.vertexCount : "-");
+			sb.Append('|').Append(mf.gameObject.name).Append(':').Append(mf.sharedMesh != null ? mf.sharedMesh.name + "/" + mf.sharedMesh.vertexCount + "/" + mf.sharedMesh.bounds.size.ToString("F3") : "-");
 		foreach (var sm in job.Prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-			sb.Append('|').Append(sm.gameObject.name).Append(':').Append(sm.sharedMesh != null ? sm.sharedMesh.name + "/" + sm.sharedMesh.vertexCount : "-");
+			sb.Append('|').Append(sm.gameObject.name).Append(':').Append(sm.sharedMesh != null ? sm.sharedMesh.name + "/" + sm.sharedMesh.vertexCount + "/" + sm.sharedMesh.bounds.size.ToString("F3") : "-");
 		return sb.ToString();
 	}
 
@@ -158,6 +161,8 @@ public static class IconRenderer {
 		_camera.transform.rotation = rot;
 		_light.transform.rotation = Quaternion.Euler(job.View.Pitch + 35f, job.View.Yaw - 35f, 0f);   // from the camera's upper left: faces and fronts lit
 		var bounds = BoundsOf(job.Instance);
+		if (job.View.CutBelow is float cut && bounds.min.y < Stage.y - cut)   // the part under the water is not in the picture
+			bounds.SetMinMax(new Vector3(bounds.min.x, Stage.y - cut, bounds.min.z), bounds.max);
 		Vector3 right = rot * Vector3.right, up = rot * Vector3.up, fwd = rot * Vector3.forward;
 		// the model's extent on the picture plane
 		float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
@@ -185,6 +190,17 @@ public static class IconRenderer {
 		_camera.nearClipPlane = 0.01f; _camera.farClipPlane = depth;
 	}
 
+	/// <summary>With <see cref="IconView.CutBelow"/>: the lowest picture row the framing counts, the cut height's outline as seen by the camera
+	/// (what lies deeper is left below the picture's edge). 0 without a cut.</summary>
+	private static int FloorRow(Job job, int h) {
+		if (job.View.CutBelow is not float cut) return 0;
+		var b = BoundsOf(job.Instance);
+		float y = Stage.y - cut, low = float.MaxValue;
+		foreach (var (x, z) in new[] { (b.min.x, b.min.z), (b.min.x, b.max.z), (b.max.x, b.min.z), (b.max.x, b.max.z) })
+			low = Math.Min(low, _camera.WorldToViewportPoint(new Vector3(x, y, z)).y);
+		return Math.Max(0, (int)(low * h));
+	}
+
 	/// <summary>
 	/// The bounding box of a rotated model is wider than the model, so the first framing leaves empty space. One test picture shows where the model really is;
 	/// the camera is then moved and zoomed so it fills the picture (minus the padding).
@@ -192,7 +208,7 @@ public static class IconRenderer {
 	private static void Refit(Job job) {
 		var black = Shot(Color.black); var white = Shot(Color.white);
 		int w = _rt.width, h = _rt.height, x0 = w, y0 = h, x1 = -1, y1 = -1;
-		for (int y = 0; y < h; y++)
+		for (int y = FloorRow(job, h); y < h; y++)
 			for (int x = 0; x < w; x++) {
 				int i = (y * w + x) * 4;
 				if ((white[i] - black[i]) + (white[i + 1] - black[i + 1]) + (white[i + 2] - black[i + 2]) > 3 * 250) continue;   // background

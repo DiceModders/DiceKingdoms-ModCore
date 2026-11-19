@@ -1,0 +1,11 @@
+{
+  // Texts the game has only in English. "game:<text>" is a text written in the game's code (the key is the English text itself).
+  // Number words: {0:one|many}; Russian and Ukrainian: {0:1|2-4|5+}.
+  "game:{0} tiles": {
+    "ru": "{0} {0:клетка|клетки|клеток}",
+    "uk": "{0} {0:клітинка|клітинки|клітинок}",
+    "de": "{0} {0:Feld|Felder}",
+    "fr": "{0} {0:case|cases}",
+    "zh-CN": "{0} 格"
+  }
+}

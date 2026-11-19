@@ -12,7 +12,10 @@ namespace DiceModders.ModCore;
 /// The mod a rule belongs to: the BepInEx plugin whose assembly registered it. <see cref="Build"/> is a fingerprint of its DLL file, so two players
 /// with the same version but different files (a changed build) can be told apart.
 /// </summary>
-internal sealed record LobbyMod(string Id, string Name, string Version, string Build = "");
+internal sealed record LobbyMod(string Id, string Name, string Version, string Build = "") {
+	/// <summary>The mod's assembly name: finds its texts (<see cref="ModCore.Texts.Load"/>) for rule titles in the game's language.</summary>
+	internal string AssemblyName { get; set; }
+}
 
 internal static class LobbyMods {
 	private static readonly Dictionary<string, LobbyMod> Cache = new();
@@ -42,6 +45,7 @@ internal static class LobbyMods {
 			var name = assembly.GetName();
 			mod = new LobbyMod(name.Name, name.Name, name.Version?.ToString() ?? "0", build);
 		}
+		mod.AssemblyName = assembly.GetName().Name;
 		Cache[cacheKey] = mod;
 		return mod;
 	}

@@ -101,7 +101,7 @@ internal static class UnitStatsRegistry {
 	internal static void SetContext(int civ) => ContextCiv = civ + 1;
 	internal static void ClearContext() => ContextCiv = 0;
 
-	internal static void Changed() { Built.Clear(); _signature = ""; }
+	internal static void Changed() { Built.Clear(); _signature = ""; _activeCount = -1; }
 
 	internal static readonly List<Action> Pending = new();
 	internal static void MatchEnded() {
@@ -182,7 +182,18 @@ internal static class UnitStatsRegistry {
 	/// all-civilization changes before per-civilization ones; within each, lower priority first (higher wins), equal priority by mod key.
 	/// Null when nothing changes this unit.
 	/// </summary>
+	// Which mods are active, as one bit per mod (Mods only grows): get_Item runs very often in combat, so a cache hit allocates nothing.
+	private static ulong _activeMask;
+	private static int _activeCount = -1;
+
 	internal static GameStats Resolve(int civ, int type, GameStats original) {
+		if (Mods.Count <= 64) {
+			ulong mask = 0;
+			for (int i = 0; i < Mods.Count; i++) if (Active(Mods[i])) mask |= 1UL << i;
+			if (mask != _activeMask || Mods.Count != _activeCount) { Built.Clear(); _signature = ""; _activeMask = mask; _activeCount = Mods.Count; }
+			else if (Built.TryGetValue((civ, type), out var hit)) return hit;
+		}
+		// a miss (or more than 64 mods): the full path below, unchanged
 		var active = new List<UnitStatsMod>();
 		var sig = new StringBuilder();
 		foreach (var m in Mods) if (Active(m)) { active.Add(m); sig.Append(m.Key).Append(';'); }
