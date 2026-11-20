@@ -28,6 +28,24 @@ internal static class LobbyState {
 	private static LobbyMember[] _members = Array.Empty<LobbyMember>();
 	private static readonly Dictionary<ulong, HashSet<string>> MemberKeys = new();
 	private static readonly Dictionary<ulong, HashSet<string>> MemberCivs = new();
+	// every member's Steam handle (to read their member data) and this player's own published values (Lobby.PlayerValues)
+	private static readonly Dictionary<ulong, SteamFriend> Friends = new();
+	private static readonly Dictionary<string, string> OwnValues = new();
+	private const string ValuePrefix = "v.";
+
+	public static bool SetOwnValue(string key, string value) {
+		if (!_lobby.HasValue || string.IsNullOrEmpty(key)) return false;
+		try { _lobby.Value.SetMemberData(ValuePrefix + key, value ?? ""); OwnValues[key] = value ?? ""; return true; }
+		catch (Exception e) { CoreLog.Once("lobby:value:set", "lobby: could not publish a player value: " + e.Message); return false; }
+	}
+
+	public static string GetMemberValue(ulong steamId, string key) {
+		if (!_lobby.HasValue || string.IsNullOrEmpty(key)) return null;
+		if (steamId == LocalSteamId) return OwnValues.TryGetValue(key, out var own) ? own : null;
+		if (!Friends.TryGetValue(steamId, out var friend)) return null;
+		try { string v = _lobby.Value.GetMemberData(friend, ValuePrefix + key); return string.IsNullOrEmpty(v) ? null : v; }
+		catch (Exception e) { CoreLog.Once("lobby:value:get", "lobby: could not read a player value: " + e.Message); return null; }
+	}
 	private static readonly List<object> Keep = new();   // the IL2CPP delegates must outlive the subscription (the whole session)
 	private static bool _subscribed;
 
@@ -194,6 +212,8 @@ internal static class LobbyState {
 			// someone published their rule keys: the "may desync" warning may change; the guard only matters when their civilizations changed
 			if (ReadMemberMods(lobby, member)) CivilizationGuard.Run();
 			GameBalance.Recompute("member mods");   // who has which mod decides which balance mods apply (cheap when nothing changed)
+			Friends[member.Id.Value] = member;
+			ModCore.Lobby.PlayerValues.RaiseChanged(member.Id.Value);
 		}
 		catch (Exception e) { CoreLog.Once("lobby:memberdata", "lobby: member data handler: " + e); }
 	}
@@ -214,6 +234,8 @@ internal static class LobbyState {
 
 	/// <summary>The local player is no longer in the lobby.</summary>
 	private static void Leave() {
+		OwnValues.Clear();   // values belong to one lobby
+		Friends.Clear();
 		TraceDataEvents("leaving"); CoreLog.Trace("lobby left");
 		_lobby = null;
 		_owner = 0;
@@ -288,6 +310,7 @@ internal static class LobbyState {
 		_owner = lobby.Owner.Id.Value;
 		ulong me = LocalSteamId;
 		var list = new List<LobbyMember>();
+		Friends.Clear();
 		try {
 			// The generic enumerator only exposes Current; MoveNext lives on the non-generic interface.
 			var members = lobby.Members.GetEnumerator();
@@ -295,6 +318,7 @@ internal static class LobbyState {
 			while (cursor.MoveNext()) {
 				SteamFriend friend = members.Current;
 				ulong id = friend.Id.Value;
+				Friends[id] = friend;
 				string name = null;
 				try { name = friend.Name; } catch { /* name not cached yet */ }
 				list.Add(new LobbyMember(id, string.IsNullOrEmpty(name) ? "Player" : name, id == _owner, id == me, true));
