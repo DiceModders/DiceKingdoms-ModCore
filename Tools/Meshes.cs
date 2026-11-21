@@ -52,7 +52,9 @@ public static class Meshes {
 
 	/// <summary>
 	/// The same format from any stream, e.g. a model embedded in your mod's DLL (<c>Assembly.GetManifestResourceStream</c>). With <paramref name="version"/>
-	/// (your mod's version) the parsed result is cached like a file's; without it the text is parsed every time.
+	/// the parsed result is cached like a file's; without it the text is parsed every time. The cache is used as long as the version is the same:
+	/// a model changed without a new version is not read again, so let the version change with the model (e.g. your mod's version plus a hash of the
+	/// embedded bytes).
 	/// </summary>
 	public static Mesh LoadDkmesh(string name, Func<Stream> open, string version, out Vector3? flagPosition, out float flagYaw) {
 		if (open == null) throw new ArgumentNullException(nameof(open));

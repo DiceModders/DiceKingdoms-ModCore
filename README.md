@@ -263,6 +263,8 @@ from another mod no longer stops the AI.
 
 ```csharp
 Mesh castle = Tools.Meshes.LoadDkmesh(path, out var flag, out float yaw);          // or Tools.Meshes.Create(name, vertices, uvs, triangles)
+// a model built into your DLL: the version keys ModCore's disk cache, so let it change with the model
+Mesh tower = Tools.Meshes.LoadDkmesh("my-tower", () => assembly.GetManifestResourceStream("models/my-tower.dkmesh"), MyPlugin.Version + "+" + modelHash, out _, out _);
 Sprite[] icons = Tools.Sprites.LoadPlayerColorSet(iconFolder);                      // 00.png .. 11.png, one per player colour
 civ.Skins.BuildingModel(BuildingTypeName.CASTLE, castle, flag, yaw, icons);
 ```
@@ -429,6 +431,28 @@ balance.SetCost(TechnologyName.UNLOCK_MARKET, new ResourceChange { Gold = 3 });
 Building cost, storage, pillage / remains rewards, health, tower range and period; technology cost. Shared by every civilization. Same safety rules as unit stats;
 the game's values are restored whenever the set of active mods changes. `Balance.Building(type)` / `DefaultBuilding(type)` / `TechnologyCost(tech)` for screens.
 
+## Build actions
+
+```csharp
+// once, in your plugin's Load: code 0..63, picked once for your mod
+Core.BuildActions.Register(7, "author.mymod (bet)", (data, buildingId) => {
+    var storage = data.Island.statistics.Storage;          // read only the game state: every computer runs this
+    if (storage.stored.gold < 3) return false;              // false: the game drops the action, as it drops any failed action
+    // ... take the gold, remember the bet for this island ...
+    return true;
+});
+
+// on the player's click, during the build phase (BuildInterface.Data is the local player's build data)
+bool ok = Core.BuildActions.Plan(buildInterface.Data, 7, buildingId);
+```
+
+A choice that changes the simulation and must happen at once, in the same order on every computer, works like the game's market purchase: the click is
+one of the game's own planned build actions, the player's screen applies it right away, the game sends it to everybody with its own messages and every
+computer applies it when the build phase ends. The game only knows its own action kinds, so a mod action travels as a repair action on a building id with
+a marker (bit 30, the code in bits 24..29); building ids never use those bits. Every player needs the mod that registered the code: plan actions only while
+your lobby rule is on (rules are used only when everybody has the mod). Codes in use: 0 Upkeep (Cathedral offering), 1 Casino (spin); a second
+registration of a code is refused and logged.
+
 ## Rule groups
 
 ```csharp
@@ -436,7 +460,8 @@ rule.InGroup(Core.Lobby.Groups.ForCivilization(civ.Id));          // a heading p
 rule.InGroup(Core.Lobby.Groups.Get("author.events", "Events"));    // or your own
 ```
 
-`Core.Lobby.Groups.All` (sorted) and `Changed` let a lobby screen show collapsible headings instead of one long list.
+`Core.Lobby.Groups.All` (sorted) and `Changed` let a lobby screen show headings instead of one long list (ModBridge shows a heading's first on/off rule as a
+tick and its other rules in their own window).
 
 ## Game fixes
 
