@@ -453,6 +453,28 @@ a marker (bit 30, the code in bits 24..29); building ids never use those bits. E
 your lobby rule is on (rules are used only when everybody has the mod). Codes in use: 0 Upkeep (Cathedral offering), 1 Casino (spin); a second
 registration of a code is refused and logged.
 
+## Building limits
+
+```csharp
+// in your plugin's Load: your new building should be one per island by default
+Core.Buildings.SuggestLimit(MyBuilding.Name, 1);
+```
+
+A mod that adds a building can suggest how many of it one island may have; ModCore then keeps every island to it. The check is part of the game's
+own check when a building is placed (`BuildData.CanBuildType`, the same step on every computer); a building at its limit is greyed out in the build
+bar with "On this island: n of m" in its tooltip, a group of walls that would go over is refused, and computer players skip it. An upgraded building
+(the upgraded Guard Tower) counts with its base building. Without a suggestion a building has no limit (0). Call it in `Load`.
+
+```csharp
+// a mod that lets the host change the limits (the Building limits mod): its numbers instead of the suggested ones
+Core.Buildings.SetLimits("My limits", type => rule.Value);   // null = the suggested limit; must be the same on every computer
+int limit = Core.Buildings.LimitOf(BuildingTypeName.FARM);    // the limit in force, 0 = none
+int count = Core.Buildings.CountOn(island, BuildingTypeName.FARM);
+```
+
+`Buildings.SuggestedLimit(type)` reads a suggestion (the Building limits mod uses it as the default of its rule), `Buildings.BaseOf(type)` gives the
+base building of an upgraded one.
+
 ## Rule groups
 
 ```csharp

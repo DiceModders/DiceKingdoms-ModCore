@@ -1,6 +1,15 @@
 {
   // Texts the game has only in English. "game:<text>" is a text written in the game's code (the key is the English text itself).
   // Number words: {0:one|many}; Russian and Ukrainian: {0:1|2-4|5+}.
+  // Other keys are ModCore's own texts.
+  "buildings.limit": {
+    "en": "On this island: {0} of {1}",
+    "de": "Auf dieser Insel: {0} von {1}",
+    "fr": "Sur cette île : {0} sur {1}",
+    "ru": "На этом острове: {0} из {1}",
+    "uk": "На цьому острові: {0} з {1}",
+    "zh-CN": "本岛：{0} / {1}"
+  },
   "game:{0} tiles": {
     "ru": "{0} {0:клетка|клетки|клеток}",
     "uk": "{0} {0:клітинка|клітинки|клітинок}",
