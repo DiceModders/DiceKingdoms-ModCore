@@ -134,10 +134,18 @@ public static class IconRenderer {
 		}
 	}
 
+	private static GameObject _staging;   // switched off: copies are made under it
+
 	private static bool Begin(Job job) {
 		if (job.Prefab == null) { CoreLog.Warn("icon renderer: the model of '" + job.Name + "' is gone"); return false; }
 		EnsureCamera(job);
-		var inst = UnityEngine.Object.Instantiate(job.Prefab);
+		// made under a switched-off parent, so the game's scripts on it never wake (Awake/OnEnable) before they are removed below
+		if (_staging == null) {
+			_staging = new GameObject("ModCore icon staging") { hideFlags = HideFlags.HideAndDontSave };
+			UnityEngine.Object.DontDestroyOnLoad(_staging);
+			_staging.SetActive(false);
+		}
+		var inst = UnityEngine.Object.Instantiate(job.Prefab, _staging.transform);
 		inst.hideFlags = HideFlags.HideAndDontSave;
 		// a picture needs only what is drawn: the game's scripts would try to join a match
 		// (the colour component stays: it knows which materials take the player colour, set in the prefab)
@@ -145,6 +153,7 @@ public static class IconRenderer {
 			if (mb.TryCast<DiceKingdoms.Interface.ColoredPaperOverrides>() == null) UnityEngine.Object.DestroyImmediate(mb);
 		foreach (var t in inst.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = Layer;
 		foreach (var pr in inst.GetComponentsInChildren<ParticleSystemRenderer>(true)) pr.enabled = false;   // smoke and fire are not part of a picture
+		inst.transform.SetParent(null, false);
 		inst.transform.position = Stage;
 		inst.transform.rotation = Quaternion.identity;
 		inst.SetActive(true);

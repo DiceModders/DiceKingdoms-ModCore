@@ -32,7 +32,14 @@ public static class Motion {
 		if (at < 0) return false;
 		var p = name.Substring(at + Tag.Length).Split(' ');
 		return p.Length >= 3 && float.TryParse(p[0], NumberStyles.Float, CultureInfo.InvariantCulture, out spin)
-			&& float.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out bob) && float.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out period);
+			&& float.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out bob) && float.TryParse(Leading(p[2]), NumberStyles.Float, CultureInfo.InvariantCulture, out period);
+	}
+
+	/// <summary>The number at the start: Unity adds "(Clone)" to the name of a copy ("...|motion 40 0.03 3(Clone)").</summary>
+	private static string Leading(string s) {
+		int n = 0;
+		while (n < s.Length && (char.IsDigit(s[n]) || s[n] == '.' || s[n] == '-' || s[n] == 'E' || s[n] == 'e' || s[n] == '+')) n++;
+		return s.Substring(0, n);
 	}
 }
 

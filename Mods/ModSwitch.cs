@@ -43,7 +43,7 @@ public sealed class ModSwitch {
 	internal void Apply(string why) {
 		bool want = Entry.Value;
 		if (want == _applied) return;
-		if (_affectsSimulation && LobbyState.MatchRunning) {
+		if (_affectsSimulation && (LobbyState.MatchRunning || LobbyState.RulesFrozen)) {   // from the islands spawning on
 			CoreLog.Info("mod '" + ModId + "' will be turned " + (want ? "on" : "off") + " when the match ends (gameplay must not change during a match)");
 			return;
 		}

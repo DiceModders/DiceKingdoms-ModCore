@@ -13,26 +13,43 @@ public static partial class ModCore {
 	/// How many buildings of one kind an island may have. A mod that adds a building suggests its default (<see cref="SuggestLimit"/>, e.g. the Casino:
 	/// 1); a mod that lets the host change limits in the lobby (the Building limits mod) tells ModCore where its values are (<see cref="SetLimits"/>).
 	/// ModCore checks the limit where the game checks a building (the same step on every computer), greys out a building at its limit in the build
-	/// bar, adds "On this island: n of m" to its tooltip and keeps computer players from planning it. An upgraded building (the upgraded Guard Tower)
-	/// counts with its base building. 0 = no limit, the default of every building.
+	/// bar and adds "On this island: n of m" to its tooltip. Computer players' buildings are refused by the same check. An upgraded building (the
+	/// upgraded Guard Tower) counts with its base building. 0 = no limit, the default of every building.
 	/// </summary>
 	public static class Buildings {
 		private static readonly Dictionary<int, int> Suggested = new();
+		private static readonly Dictionary<int, LobbyRule<bool>> SuggestedWhile = new();
 		private static Func<BuildingTypeName, int?> _source;
 
 		/// <summary>
-		/// Suggests at most <paramref name="limit"/> buildings of <paramref name="type"/> per island (0 = no limit). It is the limit whenever nothing else
-		/// sets one (with the Building limits mod: its default, which the host can change). Call it in your plugin's Load.
+		/// Suggests at most <paramref name="limit"/> buildings of <paramref name="type"/> (a base building) per island (0 = no limit). It is the limit
+		/// whenever nothing else sets one (with the Building limits mod: its default, which the host can change). Call it in your plugin's Load, for a
+		/// building your mod adds: a player without your mod would not keep to a limit on one of the game's buildings, and the computers would disagree.
 		/// </summary>
-		public static void SuggestLimit(BuildingTypeName type, int limit) {
+		public static void SuggestLimit(BuildingTypeName type, int limit) => SuggestLimit(type, limit, null);
+
+		/// <summary>
+		/// The same, used only while <paramref name="rule"/> (the lobby rule that turns your building on) is on for everybody: ModCore uses a rule only
+		/// when every player has its mod, so every computer then keeps to the limit.
+		/// </summary>
+		public static void SuggestLimit(BuildingTypeName type, int limit, LobbyRule<bool> rule) {
 			Core.Ensure();
 			Suggested[(int)type] = Math.Max(0, limit);
+			if (rule != null) SuggestedWhile[(int)type] = rule; else SuggestedWhile.Remove((int)type);
 			BuildingLimitHooks.Install();
-			CoreLog.Info("buildings: limit for building " + (int)type + " (" + type + "): " + (limit <= 0 ? "none" : limit.ToString()));
+			CoreLog.Info("buildings: limit for building " + (int)type + " (" + type + "): " + (limit <= 0 ? "none" : limit.ToString())
+			             + (rule != null ? " while the rule '" + rule.Key + "' is on" : ""));
 		}
 
-		/// <summary>The limit per island a mod suggested for <paramref name="type"/>, or 0 (no limit) when none did.</summary>
+		/// <summary>The limit per island a mod suggested for <paramref name="type"/>, or 0 (no limit) when none did (the default for a lobby rule).</summary>
 		public static int SuggestedLimit(BuildingTypeName type) => Suggested.TryGetValue((int)type, out int limit) ? limit : 0;
+
+		/// <summary>The suggested limit in force now: 0 while the rule it was suggested with is off (or not used because a player lacks its mod).</summary>
+		private static int SuggestedNow(BuildingTypeName type) {
+			int limit = SuggestedLimit(type);
+			if (limit <= 0 || !SuggestedWhile.TryGetValue((int)type, out var rule)) return limit;
+			return rule.Value && BuiltInChanges.EveryoneHas(rule) ? limit : 0;
+		}
 
 		/// <summary>
 		/// Where the limits come from instead of the suggested ones: <paramref name="limits"/> gives the limit of a base building (0 = no limit), or null
@@ -52,7 +69,7 @@ public static partial class ModCore {
 			int? value = null;
 			try { value = _source?.Invoke(baseType); }
 			catch (Exception e) { CoreLog.Once("buildings:source", "buildings: the limits source failed: " + e.Message); }
-			return Math.Max(0, value ?? SuggestedLimit(baseType));
+			return Math.Max(0, value ?? SuggestedNow(baseType));
 		}
 
 		/// <summary>How many buildings of <paramref name="type"/>'s kind the island has now (an upgraded building counts with its base).</summary>
@@ -70,8 +87,8 @@ public static partial class ModCore {
 /// buildings placed earlier in the phase already on the island. This is the check that counts.</item>
 /// <item><c>BuildData.PlaceBuildingBulk</c> prefix: walls come ten at a time and the game checks the type once per group, so a group that would go
 /// over is refused when it is planned (the other computers never get it).</item>
-/// <item><c>BuildData.CanAfford</c> postfix: computer players skip a building at its limit, and placing with Shift held stops at the limit. Not
-/// while the build bar is redrawn: there a false CanAfford would make the tooltip say resources are missing.</item>
+/// <item><c>BuildData.CanAfford</c> postfix: placing with Shift held stops at the limit (the game asks CanAfford only in the build bar, its
+/// tooltip and OnPlace). Not while the build bar is redrawn: there a false CanAfford would make the tooltip say resources are missing.</item>
 /// <item><c>BuildData.CanAffordBulk</c> postfix: the wall placer shows red when the walls would go over.</item>
 /// <item><c>BuildInterface.RefreshBuildingButtons</c> postfix: a building at its limit is greyed out (the game redraws the bar when resources or
 /// technologies change and after every placement).</item>
@@ -111,18 +128,20 @@ internal static class BuildingLimitHooks {
 	/// <summary>Upgraded -> base, from the game's ReplaceBuildings technologies; null until the game's data is loaded.</summary>
 	private static Dictionary<int, int> Upgrades() {
 		if (_upgrades != null) return _upgrades;
+		// every technology list there is (a civilization mod may bring its own), so the map is the same on every computer whatever order Unity
+		// lists them in; kept only once it has an upgrade in it (before the game fills its tables it may still be empty)
+		var map = new Dictionary<int, int>();
+		void Take(Technology t) {
+			var r = t != null ? t.TryCast<ReplaceBuildings>() : null;
+			if (r != null && r.upgradedBuildingType != r.baseBuildingType) map[(int)r.upgradedBuildingType] = (int)r.baseBuildingType;
+		}
 		foreach (var techs in Resources.FindObjectsOfTypeAll<Technologies>()) {
-			var map = new Dictionary<int, int>();
-			void Take(Technology t) {
-				var r = t != null ? t.TryCast<ReplaceBuildings>() : null;
-				if (r != null && r.upgradedBuildingType != r.baseBuildingType) map[(int)r.upgradedBuildingType] = (int)r.baseBuildingType;
-			}
 			Take(techs.upgradeGuardTower);
 			var values = techs.Values;
 			if (values != null) foreach (var t in values) Take(t);
-			return _upgrades = map;
 		}
-		return null;
+		if (map.Count == 0) return null;
+		return _upgrades = map;
 	}
 
 	internal static BuildingTypeName BaseOf(BuildingTypeName type) {
@@ -201,7 +220,7 @@ internal static class BuildingLimitHooks {
 			int limit = ModCore.Buildings.LimitOf(__0.name);
 			if (limit > 0 && CountForScreen(__instance.Island?.grid, BaseOf(__0.name)) >= limit) __result = false;
 		}
-		catch (Exception e) { CoreLog.Once("buildings:afford", "buildings: limit check (keep placing, computer players) failed: " + e); }
+		catch (Exception e) { CoreLog.Once("buildings:afford", "buildings: limit check (keep placing) failed: " + e); }
 	}
 
 	// while the game redraws the build bar (its tooltips are made there too), CanAfford is left alone: false would add "Missing:" to the tooltip

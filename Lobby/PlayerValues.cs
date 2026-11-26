@@ -15,7 +15,10 @@ public static partial class ModCore {
 		/// therefore name the turn it is meant for (for example "from turn 7"), so that every computer applies it at the same moment.
 		/// </remarks>
 		public static class PlayerValues {
-			/// <summary>Publishes this player's value for <paramref name="key"/> (use your mod's prefix, e.g. "upkeep.choices"). False when not in a lobby.</summary>
+			/// <summary>
+			/// Publishes this player's value for <paramref name="key"/> (use your mod's prefix, e.g. "upkeep.choices"). False when not in a Steam lobby: the
+			/// value is then kept for this computer only (a game against computer players), and <see cref="Get"/> returns it for the local player.
+			/// </summary>
 			public static bool Set(string key, string value) { Core.Ensure(); return LobbyState.SetOwnValue(key, value); }
 
 			/// <summary>The value player <paramref name="steamId"/> published for <paramref name="key"/>, or null (no lobby, no such member, never set).</summary>

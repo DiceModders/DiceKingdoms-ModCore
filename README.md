@@ -456,14 +456,16 @@ registration of a code is refused and logged.
 ## Building limits
 
 ```csharp
-// in your plugin's Load: your new building should be one per island by default
-Core.Buildings.SuggestLimit(MyBuilding.Name, 1);
+// in your plugin's Load: your new building should be one per island by default, while its lobby rule is on
+Core.Buildings.SuggestLimit(MyBuilding.Name, 1, myBuildingRule);
 ```
 
 A mod that adds a building can suggest how many of it one island may have; ModCore then keeps every island to it. The check is part of the game's
 own check when a building is placed (`BuildData.CanBuildType`, the same step on every computer); a building at its limit is greyed out in the build
-bar with "On this island: n of m" in its tooltip, a group of walls that would go over is refused, and computer players skip it. An upgraded building
-(the upgraded Guard Tower) counts with its base building. Without a suggestion a building has no limit (0). Call it in `Load`.
+bar with "On this island: n of m" in its tooltip, and a group of walls that would go over is refused. Computer players' buildings are refused by the
+same check. An upgraded building (the upgraded Guard Tower) counts with its base building. Without a suggestion a building has no limit (0). Call it
+in `Load`, for a building your mod adds (a player without your mod would not keep to a limit on one of the game's buildings). With the rule, the
+suggestion is used only while that rule is on for everybody.
 
 ```csharp
 // a mod that lets the host change the limits (the Building limits mod): its numbers instead of the suggested ones

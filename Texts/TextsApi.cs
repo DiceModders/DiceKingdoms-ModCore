@@ -39,9 +39,12 @@ public static partial class ModCore {
 		/// One of the GAME's own texts by its key (e.g. <c>"unit.ARCHER.name"</c>, <c>"building.ARCHERY_RANGE.name"</c>,
 		/// <c>"technology.TEMPLARS.name"</c>, <c>"civilization.EUROPE.name"</c>) in the current language, the way the game itself draws it
 		/// (<c>ITextElement.L(key)</c>, then Render: icons, and any mod's <c>gamekey:</c> fix, included). <paramref name="fallback"/> (else the key)
-		/// when the game has no such key.
+		/// when the game has no such key, and while the game is still loading (then <see cref="LanguageChanged"/> follows once it can be read).
 		/// </summary>
 		public static string Game(string key, string fallback = null) {
+			// not while the game is still loading: reading its localization then can make Unity wait on the main thread and hang the game.
+			// Asking for the language marks it as wanted early, so LanguageChanged is raised once the texts can be read: ask again then.
+			if (!TextLanguage.Ready) { _ = TextLanguage.Current; return fallback ?? key; }
 			try {
 				var element = DiceKingdoms.Interface.ITextElement.L(key, new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<DiceKingdoms.Interface.ITextElement>(0));
 				string text = element.Render;

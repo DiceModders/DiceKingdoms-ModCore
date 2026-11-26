@@ -34,13 +34,18 @@ internal static class LobbyState {
 	private const string ValuePrefix = "v.";
 
 	public static bool SetOwnValue(string key, string value) {
-		if (!_lobby.HasValue || string.IsNullOrEmpty(key)) return false;
+		if (string.IsNullOrEmpty(key)) return false;
+		if (!_lobby.HasValue) { OwnValues[key] = value ?? ""; return false; }   // a game without a Steam lobby: kept for this computer only
 		try { _lobby.Value.SetMemberData(ValuePrefix + key, value ?? ""); OwnValues[key] = value ?? ""; return true; }
 		catch (Exception e) { CoreLog.Once("lobby:value:set", "lobby: could not publish a player value: " + e.Message); return false; }
 	}
 
 	public static string GetMemberValue(ulong steamId, string key) {
-		if (!_lobby.HasValue || string.IsNullOrEmpty(key)) return null;
+		if (string.IsNullOrEmpty(key)) return null;
+		if (!_lobby.HasValue) {   // a game without a Steam lobby: only the local player has values
+			bool local = steamId != 0 && (steamId == LocalSteamId || steamId == (ModCore.Players.Local?.Id ?? 0));
+			return local && OwnValues.TryGetValue(key, out var mine) ? mine : null;
+		}
 		if (steamId == LocalSteamId) return OwnValues.TryGetValue(key, out var own) ? own : null;
 		if (!Friends.TryGetValue(steamId, out var friend)) return null;
 		try { string v = _lobby.Value.GetMemberData(friend, ValuePrefix + key); return string.IsNullOrEmpty(v) ? null : v; }
@@ -291,7 +296,7 @@ internal static class LobbyState {
 	/// <summary>Back in the lobby or the menu: rules follow the lobby again (or fall back to their defaults outside one).</summary>
 	public static void MatchEnded() {
 		MatchState.Clear();
-		if (!MatchRunning) { UnfreezeRules(); return; }   // left while the islands were spawning: the rules follow the lobby again
+		if (!MatchRunning) { UnfreezeRules(); ModSwitches.MatchEnded(); return; }   // left while the islands were spawning: rules and switches follow the lobby again
 		TraceDataEvents("match end"); CoreLog.Info("match ended");
 		MatchRunning = false;
 		UnfreezeRules();
